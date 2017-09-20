@@ -1,0 +1,302 @@
+---
+title: "placentaDifferentialExpression"
+author: "Melanie Smith"
+date: "20/09/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import Counts and Sample Data
+
+This step imports the raw counts data and samples metadata and reports some summary information.
+
+```{r message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(pander)
+
+# import miRNA counts table from VM
+countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
+                             sep="\t", 
+                             header=T, 
+                             row.names="mirna")
+
+# remove the "_R1" and replace "Q" with "PAC" from the column names (eg Q006_S1_R1 becomes PAC006 to match the 'samples' data.frame) in the 'counts' data.frame
+names(countsPlacenta) = sub("_R1","",names(countsPlacenta)) 
+names(countsPlacenta) = sub("Q","PAC",names(countsPlacenta))
+names(countsPlacenta) = sub("_S.*","",names(countsPlacenta))
+# correct sample name mislabeled by QIAGEN
+names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
+# Reorder data.frame by columns
+countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing=FALSE)]
+
+# import the samples data from VM 
+samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
+  dplyr::select(-starts_with("X"))
+
+samples <- samples[c(1, 10, 12:17)] %>%
+  as.data.frame()
+names(samples) <- c("tempname", "biologicalGroup", "maternalAge", "gestation", "BMI", "smoker", "ethnicity", "boxPosition" )
+
+# Remove the "+" from column 4 "Gestation" nb: escape special character using \\
+samples$gestation <- gsub("\\+", "", samples$gestation)
+
+# reassign object classes
+samples$biologicalGroup <- as.factor(samples$biologicalGroup)
+samples$gestation <- as.integer(samples$gestation)
+
+# create a vector of just sample names from samples$samplename
+tempname <- samples %>%
+  dplyr::select(tempname)
+# pad samplename in samples df to match count data df (PAC006 style)
+samplename <- tempname %>% 
+  mutate(samplename = paste0("PAC",stringr::str_pad(tempname, width = 3, pad = "0"))) %>%
+  dplyr::select(samplename)
+samplename <- as.data.frame(samplename)
+samples <- c(samples, samplename)
+# reorder columns (personal preference)
+samples <- samples[c(9, 2, 3, 4, 5, 6, 7, 8, 1)]
+
+# add new column named "group" into samples data.frame 
+samples$group <- rep(NA, 48)
+
+# add new group 'Trimester 1 or 2' factor to each row based on gestation
+# Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
+samples$group <- ifelse(samples$gestation<=13, "Trimester_1", ifelse(samples$gestation>=14, "Trimester_2", NA))
+
+# group as factor
+samples$group <- as.factor(samples$group)
+
+samples <- as.data.frame(samples)
+
+# Add fetal sex to samples df
+fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
+  dplyr::select(-matches("gestation")) %>%
+  mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
+
+fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female", ifelse(fetalSex$fetalSex == "XY", "Male", NA))
+
+samples <- left_join(samples, fetalSex, by = "samplename")
+
+pandoc.table(samples[,c(-2, -8, -9, -11)],
+             caption = "Meta Data for all placenta samples",
+             split.table=Inf)
+
+summary(samples$group)
+summary(samples$fetalSex)
+
+
+lapply(samples[, c(3:7)], function(x) {
+    if (is.numeric(x)) return(summary(x))
+    if (is.factor(x)) return(table(x))
+})
+
+```
+
+### Create LaTeX code for the samples table in methods section
+
+```{r warning=FALSE, error=FALSE}
+
+library(xtable)
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "")
+
+# samples table for thesis
+xtable(samples[,c(-2, -8,-9, -11)])
+
+```
+
+### Plot to visualise the pre filtered, un-normalised library sizes in Placenta
+
+```{r warning=FALSE}
+
+library(tidyverse)
+library(magrittr)
+library(dplyr)
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+# count the number of 'non-zero' (ie expressed) miRNAs for each sample before filtering
+nonzero <- function(x) sum(x != 0)
+rawNonZero <- plyr::numcolwise(nonzero)(countsPlacenta)
+rawNonZero <- t(rawNonZero) %>%
+  as.data.frame()
+rawNonZero <- tibble::rownames_to_column(rawNonZero) %>%
+  set_colnames(c("samplename", "rawmiRNA")) %>%
+  as.data.frame()
+
+#png("rawmiRNAPlacenta.png")
+ggplot(data=rawNonZero, aes(x=samplename, y=rawmiRNA, fill = samples$group)) +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of Unique miRNAs Identified", title = "Count of pre-filtered miRNAs in Placenta") + 
+  geom_hline(yintercept=1835,linetype="dashed") +
+  geom_text(aes(13, 1900, label = "1835 Total miRNA"), size = 3, colour = "black") +
+  scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+```
+
+We start with a total of 1835 unique miRNAs - of which no single sample has more than 1256 individual miRNAs. 
+
+# Filter sequencing noise   
+
+Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
+* Counts less than 5 reduced to 0
+* Logic check and record how many miRs will be filtered
+* Filter to remove miRs with zero counts in all samples
+
+```{r warning=FALSE, message=FALSE}
+
+# exclude any individual count less than 5
+countsPlacenta[countsPlacenta < 5] <- 0
+
+# check to establish if any miRNA have no expression across all samples
+table(rowSums(countsPlacenta==0) == 48)
+
+# remove miRNAs with zero counts in all samples
+countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta)!=0, ]
+
+```
+
+After filtering out the sequencing noise (sequence counts with low confidence) we are left with 1256 unique miRNAs.
+
+# Establish DGEList object
+
+The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
+
+```{r message=FALSE, warning=FALSE}
+
+# load required Libraries
+library(edgeR)
+library(tidyverse)
+
+# new df of miRNA names for DGEList object
+genes <- as.character(rownames(countsPlacenta)) %>%
+  as.data.frame() %>%
+  set_colnames("SYMBOL") 
+
+# new DGEList object for differential expression analysis
+DGEList_placenta <- DGEList(counts=countsPlacenta, samples=samples, genes = genes)
+
+# saveRDS(DGEList_placenta, "rawDGEList_placenta.rds")
+
+```
+
+# TMM normalisation of libraries
+
+Before differential expression analysis the sample libraries need to be normalised to account for different library sizes.   
+Normalising the libraries allows for the direct comparison between samples.   
+Here the Trimmed Mean of M Values method is used.   
+Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
+
+```{r warning=FALSE}
+
+library(RColorBrewer)
+
+# Distribution of un-normalised counts 
+nsamples <- ncol(DGEList_placenta)
+col <- brewer.pal(nsamples, "Paired")
+
+lcpm <- cpm(DGEList_placenta, log=TRUE)
+boxplot(lcpm, las=2, col=col, main="")
+title(main="Placenta: Un-normalised data",ylab="Log-cpm") 
+
+# calculate normalisation factors and apply to the DGEList object
+DGEList_placenta <- calcNormFactors(DGEList_placenta, method="TMM")
+
+# saveRDS(DGEList_placenta, "normDGEList_placenta.rds")
+
+# vector of normalisation factors if required
+#DGEList_placenta$samples$norm.factors 
+
+```
+
+# Filter biological noise and plot 
+
+Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2).   
+
+```{r warning=FALSE, error=FALSE}
+
+library(plyr)
+library(tidyverse)
+library(edgeR)
+
+# set ggplot theme
+theme_set(theme_bw())
+
+# new df of unfiltered cpm for the reduced DGEList
+rawCpm_placenta <- cpm(DGEList_placenta)
+
+# new df of unfiltered log 2 cpm for the reduced DGEList
+rawlcpm_placenta <- cpm(DGEList_placenta, log = TRUE)
+
+# remove lowly expressed genes 
+keep.exprs <- rowSums(rawCpm_placenta > 2) >= 7
+DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes=FALSE]
+
+## The density of log-CPM values for pre-filtered data (A) and post-filtered data (B) are shown for each sample. 
+## Dotted vertical lines mark the log-CPM of zero threshold (equivalent to a CPM value of 1) used in the filtering step.
+
+nsamples <- ncol(DGEList_placenta)
+col <- brewer.pal(nsamples, "Paired")
+par(mfrow=c(1,2))
+plot(density(rawlcpm_placenta[,1]), col=col[1], lwd=2, ylim=c(0,0.15), las=2,
+  main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm") 
+abline(v=0, lty=3)
+for (i in 2:nsamples){
+  den <- density(rawlcpm_placenta[,i])
+  lines(den$x, den$y, col=col[i], lwd=2)
+}
+#legend("topright", legend=samples$samplename, text.col=col, bty="n")
+
+lcpm <- cpm(DGEList_placenta, log=TRUE)
+plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.15), las=2,
+  main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm") 
+abline(v=0, lty=3)
+for (i in 2:nsamples){
+  den <- density(lcpm[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+#legend("topright", legend=samples$samplename, text.col=col, bty="n")
+
+# plot of filtered and normalised library sizes
+lcpm <- cpm(DGEList_placenta, log=TRUE)
+boxplot(lcpm, las=2, col=col, main="")
+title(main="B. Placenta: Normalised data",ylab="Log-cpm")
+
+# Plot filtered library sizes against total miRNA
+# count the number of 'non-zero' (ie expressed) miRNAs for each sample after filtering
+filteredNonZero <- (DGEList_placenta[[1]]) %>%
+  as.data.frame()
+
+filteredNonZero <-  t(numcolwise(nonzero)(filteredNonZero)) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column()
+
+#png("robustmiRNAPlacenta.png")
+ggplot(data=filteredNonZero, aes(x=rowname, y=V1, fill=samples$group)) +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in Placenta After Filtering") + 
+  geom_hline(yintercept=714,linetype="dashed") +
+  geom_text(aes(12, 750, label = "714 Total miRNA"), size = 3, colour = "black") +
+  scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+# Distribution of normalised and filtered counts data
+lcpm <- cpm(DGEList_placenta, log=TRUE)
+boxplot(lcpm, las=2, col=col, main="")
+title(main="Placenta: Normalised data",ylab="Log-cpm")
+
+```
+
+```{r}
+sessionInfo()
+```
