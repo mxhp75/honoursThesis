@@ -65,7 +65,8 @@ samples$group <- rep(NA, 48)
 
 # add new group 'Trimester 1 or 2' factor to each row based on gestation
 # Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
-samples$group <- ifelse(samples$gestation<=13, "Trimester_1", ifelse(samples$gestation>=14, "Trimester_2", NA))
+samples$group <- ifelse(samples$gestation<=13, "Trimester_1", 
+                        ifelse(samples$gestation>=14, "Trimester_2", NA))
 
 # group as factor
 samples$group <- as.factor(samples$group)
@@ -109,7 +110,9 @@ xtable(samples[,c(-2, -8,-9, -11)])
 
 ```
 
-### Plot to visualise the pre filtered, un-normalised library sizes in Placenta
+### Plot to visualise the pre filtered, unique miRNA population between samples in Placenta
+
+From the raw counts we can see that there is not a lot of difference in the number of unique miRNAs identified between samples, However the actual population of miRNAs between samples does differ.
 
 ```{r warning=FALSE}
 
@@ -122,13 +125,15 @@ theme_set(theme_bw())
 
 # count the number of 'non-zero' (ie expressed) miRNAs for each sample before filtering
 nonzero <- function(x) sum(x != 0)
-rawNonZero <- plyr::numcolwise(nonzero)(countsPlacenta)
-rawNonZero <- t(rawNonZero) %>%
-  as.data.frame()
-rawNonZero <- tibble::rownames_to_column(rawNonZero) %>%
+
+rawNonZero <- plyr::numcolwise(nonzero)(countsPlacenta) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
   set_colnames(c("samplename", "rawmiRNA")) %>%
   as.data.frame()
 
+# produce plot of # unique miRNA per sample
 #png("rawmiRNAPlacenta.png")
 ggplot(data=rawNonZero, aes(x=samplename, y=rawmiRNA, fill = samples$group)) +
   geom_bar(stat="identity") +
@@ -141,7 +146,7 @@ ggplot(data=rawNonZero, aes(x=samplename, y=rawmiRNA, fill = samples$group)) +
 
 ```
 
-We start with a total of 1835 unique miRNAs - of which no single sample has more than 1256 individual miRNAs. 
+We start with a total of 1835 unique miRNAs - of which no single sample has more than 1102 individual miRNAs. 
 
 # Filter sequencing noise   
 
@@ -163,7 +168,7 @@ countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta)!=0, ]
 
 ```
 
-After filtering out the sequencing noise (sequence counts with low confidence) we are left with 1256 unique miRNAs.
+After filtering out the sequencing noise (sequence counts with low confidence) we are left with 1256 unique miRNAs (579 are filtered as counts noise).
 
 # Establish DGEList object
 
@@ -189,7 +194,7 @@ DGEList_placenta <- DGEList(counts=countsPlacenta, samples=samples, genes = gene
 
 # TMM normalisation of libraries
 
-Before differential expression analysis the sample libraries need to be normalised to account for different library sizes.   
+Before differential expression analysis the sample libraries need to be normalised to account for differences in initial library size.     
 Normalising the libraries allows for the direct comparison between samples.   
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
@@ -209,7 +214,7 @@ title(main="Placenta: Un-normalised data",ylab="Log-cpm")
 # calculate normalisation factors and apply to the DGEList object
 DGEList_placenta <- calcNormFactors(DGEList_placenta, method="TMM")
 
-# saveRDS(DGEList_placenta, "normDGEList_placenta.rds")
+#saveRDS(DGEList_placenta, "normDGEList_placenta.rds")
 
 # vector of normalisation factors if required
 #DGEList_placenta$samples$norm.factors 
@@ -247,7 +252,7 @@ col <- brewer.pal(nsamples, "Paired")
 par(mfrow=c(1,2))
 plot(density(rawlcpm_placenta[,1]), col=col[1], lwd=2, ylim=c(0,0.15), las=2,
   main="", xlab="")
-title(main="A. Raw data", xlab="Log-cpm") 
+title(main="A. Unfiltered data", xlab="Log-cpm") 
 abline(v=0, lty=3)
 for (i in 2:nsamples){
   den <- density(rawlcpm_placenta[,i])
@@ -266,10 +271,7 @@ lines(den$x, den$y, col=col[i], lwd=2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
 
-# plot of filtered and normalised library sizes
-lcpm <- cpm(DGEList_placenta, log=TRUE)
-boxplot(lcpm, las=2, col=col, main="")
-title(main="B. Placenta: Normalised data",ylab="Log-cpm")
+par(mfrow=c(1,1))
 
 # Plot filtered library sizes against total miRNA
 # count the number of 'non-zero' (ie expressed) miRNAs for each sample after filtering
@@ -296,6 +298,126 @@ boxplot(lcpm, las=2, col=col, main="")
 title(main="Placenta: Normalised data",ylab="Log-cpm")
 
 ```
+
+# MDS Plots   
+
+The multidimensional scaling plots create a temp. log fold change between pairs.   
+Here we see that the Leading logFC on dimension 1 fails to seperate the samples by trimester, but does roughly separate the samples in gestational order along the 2^nd dimension
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+lcpm <- cpm(DGEList_placenta, log=TRUE, prior.count = 1)
+
+col.group <- samples$group
+levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
+col.group <- as.character(col.group)
+
+plotMDS(cpm(DGEList_placenta, log = TRUE), labels=samples$samplename, col=col.group)
+title(main="A. Trimester ")
+
+```
+
+# Differential Expression Analysis   
+  * Differential Expression between Trimester 1 and Trimester 2
+    + Here the design matrix treats gestation as a discrete variable with levels "Trimester 1" and "Trimester 2".
+  * Differential Expression between fetal sex
+    + Here the design matrix treats fetal sex as discrete variables with levels "Female" and "Male".
+
+```{r}
+
+# load required libraries
+library(tidyverse)
+library(edgeR)
+library(limma)
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+design <- model.matrix(~group + Sex, data = samples)
+cont.mat <- c(0, 1, 0) 
+# position 1=intercept, position 2=group, position 3=sex
+# when looking at sex differences c(0,0,1)
+# when looking at trimester differences c(0,1,0)
+
+v <- voomWithQualityWeights(DGEList_placenta, design, plot=TRUE)
+
+fit <- lmFit(v, design)
+fit <- contrasts.fit(fit, cont.mat)
+fit <- eBayes(fit) # moderated t-test
+summary(decideTests(fit))
+topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
+plotMD(fit)
+
+```
+
+# Volcano plots for visualisation of differential expression
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+decide <- decideTests(fit)
+
+d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[1:nrow(topTable)] <- 1
+d2$threshold <- as.factor(d2$threshold)
+
+d3 <- decideTests(fit) %>%
+  as.data.frame
+d3 <- d3[1]
+
+d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by="rowname")
+d4$V1 <- as.factor(d4$V1)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+
+colour <- c("red", "black", "darkgreen")
+
+#png("dePlacenta.png")
+ggplot(data=d4, aes(x=logFC, y=neg.log10FDR, colour=V1)) +
+  geom_point(alpha=0.8, size=2.00) +
+  xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
+  ggtitle("Gestation Based Differential Expression of \nmiRNA in Placenta") + 
+  scale_color_manual(values = colour, name="miRNA\nRegulation\n(Second Trimester)",
+                         breaks=c("-1", "0", "1"),
+                         labels=c("Down-regulated", "Deregulated", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept=1.321393, linetype = "dashed")
+#dev.off()
+
+rm(list = c("d2","d3","d4"))
+
+
+## Use this plot when looking at fetal sex differences - otherwise comment out.##
+
+# d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
+# d2$threshold <- 0
+# d2$threshold[1:9] <- 1
+# d2$threshold <- as.factor(d2$threshold)
+# 
+# d3 <- decideTests(fit) %>%
+#   as.data.frame
+# d3 <- d3[1]
+# 
+# d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by="rowname")
+# d4$V1 <- as.factor(d4$V1)
+# d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+# 
+# 
+# png("deFetalSex.png")
+# ggplot(data=d4, aes(x=logFC, y=neg.log10FDR, colour=V1)) +
+#   geom_point(alpha=0.9, size=2.00) +
+#   xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
+#   ggtitle("Fetal Sex Based Differential Expression of \nmiRNA in Placenta") + 
+#   scale_color_manual(values = colour, name="miRNA\nRegulation\n(Male Fetus)",
+#                          breaks=c("-1", "0", "1"),
+#                          labels=c("Down-regulated", "Deregulated", "Up-regulated")) +
+#   theme(plot.title = element_text(hjust = 0.5)) +
+#   geom_hline(yintercept=1.582312, linetype = "dashed")
+# dev.off()
+# 
+# rm(list = c("d2","d3","d4"))
+
+```
+
 
 ```{r}
 sessionInfo()
