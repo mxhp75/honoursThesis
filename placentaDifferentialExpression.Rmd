@@ -37,28 +37,16 @@ countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing=FALS
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
   dplyr::select(-starts_with("X"))
 
-samples <- samples[c(1, 10, 12:17)] %>%
-  as.data.frame()
-names(samples) <- c("tempname", "biologicalGroup", "maternalAge", "gestation", "BMI", "smoker", "ethnicity", "boxPosition" )
+samples <- samples[,c(1, 12:16)] %>%
+  as.data.frame() %>%
+  set_colnames(c("samplename", "maternalAge", "gestation", "BMI", "smoker", "ethnicity")) %>% 
+  mutate(samplename = paste0("PAC",stringr::str_pad(samplename, width = 3, pad = "0")))
 
-# Remove the "+" from column 4 "Gestation" nb: escape special character using \\
+# Remove the "+" from column 4 "gestation" nb: escape special character using \\
 samples$gestation <- gsub("\\+", "", samples$gestation)
 
 # reassign object classes
-samples$biologicalGroup <- as.factor(samples$biologicalGroup)
 samples$gestation <- as.integer(samples$gestation)
-
-# create a vector of just sample names from samples$samplename
-tempname <- samples %>%
-  dplyr::select(tempname)
-# pad samplename in samples df to match count data df (PAC006 style)
-samplename <- tempname %>% 
-  mutate(samplename = paste0("PAC",stringr::str_pad(tempname, width = 3, pad = "0"))) %>%
-  dplyr::select(samplename)
-samplename <- as.data.frame(samplename)
-samples <- c(samples, samplename)
-# reorder columns (personal preference)
-samples <- samples[c(9, 2, 3, 4, 5, 6, 7, 8, 1)]
 
 # add new column named "group" into samples data.frame 
 samples$group <- rep(NA, 48)
@@ -69,7 +57,7 @@ samples$group <- ifelse(samples$gestation<=13, "Trimester_1",
                         ifelse(samples$gestation>=14, "Trimester_2", NA))
 
 # group as factor
-samples$group <- as.factor(samples$group)
+samples$group <- as.factor(samples$group) 
 
 samples <- as.data.frame(samples)
 
@@ -78,11 +66,13 @@ fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
   dplyr::select(-matches("gestation")) %>%
   mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
 
-fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female", ifelse(fetalSex$fetalSex == "XY", "Male", NA))
+fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female", 
+                       ifelse(fetalSex$fetalSex == "XY", "Male", NA))
 
 samples <- left_join(samples, fetalSex, by = "samplename")
 
-pandoc.table(samples[,c(-2, -8, -9, -11)],
+# summary tables
+pandoc.table(samples,
              caption = "Meta Data for all placenta samples",
              split.table=Inf)
 
@@ -90,9 +80,11 @@ summary(samples$group)
 summary(samples$fetalSex)
 
 
-lapply(samples[, c(3:7)], function(x) {
+lapply(samples[, c(2:8)], function(x) {
     if (is.numeric(x)) return(summary(x))
+    if (is.integer(x)) return(summary(x))
     if (is.factor(x)) return(table(x))
+    if (is.character(x)) return(table(x))
 })
 
 ```
@@ -106,13 +98,13 @@ options(xtable.floating = FALSE)
 options(xtable.timestamp = "")
 
 # samples table for thesis
-xtable(samples[,c(-2, -8,-9, -11)])
+xtable(samples[, -8,])
 
 ```
 
 ### Plot to visualise the pre filtered, unique miRNA population between samples in Placenta
 
-From the raw counts we can see that there is not a lot of difference in the number of unique miRNAs identified between samples, However the actual population of miRNAs between samples does differ.
+From the raw counts we can see that there is not a lot of difference in the number of unique miRNAs identified between samples, however the actual population of miRNAs between samples does differ.
 
 ```{r warning=FALSE}
 
@@ -313,15 +305,13 @@ levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
 col.group <- as.character(col.group)
 
 plotMDS(cpm(DGEList_placenta, log = TRUE), labels=samples$samplename, col=col.group)
-title(main="A. Trimester ")
+title(main="Trimester ")
 
 ```
 
-# Differential Expression Analysis   
+# Differential Expression Analysis - Trimester 
   * Differential Expression between Trimester 1 and Trimester 2
     + Here the design matrix treats gestation as a discrete variable with levels "Trimester 1" and "Trimester 2".
-  * Differential Expression between fetal sex
-    + Here the design matrix treats fetal sex as discrete variables with levels "Female" and "Male".
 
 ```{r}
 
@@ -336,8 +326,8 @@ theme_set(theme_bw())
 design <- model.matrix(~group + Sex, data = samples)
 cont.mat <- c(0, 1, 0) 
 # position 1=intercept, position 2=group, position 3=sex
-# when looking at sex differences c(0,0,1)
 # when looking at trimester differences c(0,1,0)
+# when looking at sex differences c(0,0,1)
 
 v <- voomWithQualityWeights(DGEList_placenta, design, plot=TRUE)
 
@@ -350,7 +340,7 @@ plotMD(fit)
 
 ```
 
-# Volcano plots for visualisation of differential expression
+## Volcano plot for visualisation of differential expression by Trimester
 
 ```{r warning=FALSE, error=FALSE, message=FALSE}
 
@@ -358,7 +348,7 @@ decide <- decideTests(fit)
 
 d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
 d2$threshold <- 0
-d2$threshold[1:nrow(topTable)] <- 1
+d2$threshold[0:nrow(topTable)] <- 1
 d2$threshold <- as.factor(d2$threshold)
 
 d3 <- decideTests(fit) %>%
@@ -385,39 +375,71 @@ ggplot(data=d4, aes(x=logFC, y=neg.log10FDR, colour=V1)) +
 
 rm(list = c("d2","d3","d4"))
 
+```
 
-## Use this plot when looking at fetal sex differences - otherwise comment out.##
+# Differential Expression Analysis   - Fetal Sex
+  * Differential Expression between fetal sex
+    + Here the design matrix treats fetal sex as discrete variables with levels "Female" and "Male".
 
-# d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
-# d2$threshold <- 0
-# d2$threshold[1:9] <- 1
-# d2$threshold <- as.factor(d2$threshold)
-# 
-# d3 <- decideTests(fit) %>%
-#   as.data.frame
-# d3 <- d3[1]
-# 
-# d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by="rowname")
-# d4$V1 <- as.factor(d4$V1)
-# d4$neg.log10FDR <- -log10(d4$adj.P.Val)
-# 
-# 
-# png("deFetalSex.png")
-# ggplot(data=d4, aes(x=logFC, y=neg.log10FDR, colour=V1)) +
-#   geom_point(alpha=0.9, size=2.00) +
-#   xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
-#   ggtitle("Fetal Sex Based Differential Expression of \nmiRNA in Placenta") + 
-#   scale_color_manual(values = colour, name="miRNA\nRegulation\n(Male Fetus)",
-#                          breaks=c("-1", "0", "1"),
-#                          labels=c("Down-regulated", "Deregulated", "Up-regulated")) +
-#   theme(plot.title = element_text(hjust = 0.5)) +
-#   geom_hline(yintercept=1.582312, linetype = "dashed")
-# dev.off()
-# 
-# rm(list = c("d2","d3","d4"))
+```{r}
+
+# load required libraries
+library(tidyverse)
+library(edgeR)
+library(limma)
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+design <- model.matrix(~group + Sex, data = samples)
+cont.mat <- c(0, 0, 1) 
+# position 1=intercept, position 2=group, position 3=sex
+# when looking at trimester differences c(0,1,0)
+# when looking at sex differences c(0,0,1)
+
+v <- voomWithQualityWeights(DGEList_placenta, design, plot=TRUE)
+
+fit <- lmFit(v, design)
+fit <- contrasts.fit(fit, cont.mat)
+fit <- eBayes(fit) # moderated t-test
+summary(decideTests(fit))
+topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
+plotMD(fit)
 
 ```
 
+## Volcano plot for differential expression by fetal sex
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(topTable)] <- 1
+d2$threshold <- as.factor(d2$threshold)
+
+d3 <- decideTests(fit) %>%
+  as.data.frame
+d3 <- d3[1]
+
+d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by="rowname")
+d4$V1 <- as.factor(d4$V1)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+
+#png("deFetalSex.png")
+ggplot(data=d4, aes(x=logFC, y=neg.log10FDR, colour=V1)) +
+  geom_point(alpha=0.9, size=2.00) +
+  xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
+  ggtitle("Fetal Sex Based Differential Expression of \nmiRNA in Placenta") +
+  scale_color_manual(values = colour, name="miRNA\nRegulation\n(Male Fetus)",
+                         breaks=c("-1", "0", "1"),
+                         labels=c("Down-regulated", "Deregulated", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept=1.582312, linetype = "dashed")
+#dev.off()
+
+rm(list = c("d2","d3","d4"))
+
+```
 
 ```{r}
 sessionInfo()
