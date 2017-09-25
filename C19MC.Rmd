@@ -33,7 +33,7 @@ names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
 # Reorder data.frame by columns
 countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing=FALSE)]
 
-# Import plasma counts table from VM
+# Import plasma miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
                 sep="\t",
                 header=T, 
@@ -90,9 +90,9 @@ mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
 ## Filter sequencing noise - Placenta
 
 Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
-* Counts less than 5 reduced to 0
-* Logic check and record how many miRs will be filtered
-* Filter to remove miRs with zero counts in all samples
+  * Counts less than 5 reduced to 0
+  * Logic check and record how many miRs will be filtered
+  * Filter to remove miRs with zero counts in all samples
 
 ```{r warning=FALSE, message=FALSE}
 
@@ -173,7 +173,7 @@ DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes=FALSE]
 
 # Filter and Normalise plasma counts
 
-## Filter sequencing noise - Plasa   
+## Filter sequencing noise - Plasma   
 
 Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
 * Counts less than 5 reduced to 0
@@ -251,16 +251,75 @@ DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes=FALSE]
 
 ```
 
-# C19MC
+# C19MC - Chromosome 19 miRNA mega cluster - *Placenta Specific Expression*
+
+## geom_line of C19MC placental miRNA in plasma
+
+```{r}
+
+library(tidyverse)
+library(reshape2)
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+cpmDGEList_placenta <- cpm(DGEList_placenta) %>%
+  as.data.frame()
+
+cpmDGEList_plasma <- cpm(DGEList_plasma) %>%
+  as.data.frame()
+
+weeks <- samples[, c("samplename", "gestation")]
+
+# C19MC up in week 8
+up <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %in% c("hsa-miR-517a-3p", "hsa-miR-518a-3p", "hsa-miR-518b", "hsa-miR-518c-3p", "hsa-miR-1323")) %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(c('rowname' = 'samplename')) %>%
+  left_join(., weeks, by = 'samplename') %>%
+  select(., -samplename) %>%
+  melt(., id = 'gestation')
+up$week_8 <- "up"
+
+# C19MC down in week 8
+down <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %in% c("hsa-miR-498", "hsa-miR-512-3p", "hsa-miR-515-5p", "hsa-miR-517a-5p", "hsa-miR-517c-3p", "hsa-miR-518a-5p", "hsa-miR-518c-5p", "hsa-miR-518e-3p", "hsa-miR-518e-5p", "hsa-miR-519a-3p", "hsa-miR-519a-5p", "hsa-miR-519d-3p", "hsa-miR-519d-5p", "hsa-miR-520a-3p", "hsa-miR-520a-5p", "hsa-miR-525-3p", "hsa-miR-525-5p", "hsa-miR-526a", "hsa-miR-526b-3p", "hsa-miR-526b-5p")) %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(c('rowname' = 'samplename')) %>%
+  left_join(., weeks, by = 'samplename') %>%
+  select(., -samplename) %>%
+  melt(., id = 'gestation')
+down$week_8 <- "down"
+
+c19mc_placenta <- rbind(up, down)
+
+
+
+aggregate_placenta <- aggregate(value ~ gestation + week_8 + variable, data = c19mc_placenta, mean)
+
+
+#pdf("~/down.pdf")
+ggplot(aggregate_placenta, aes(x=factor(aggregate_placenta$gestation), y=value, group = variable, colour = variable)) +
+  geom_line() +
+  labs(x = "Weeks' Gestation", y = "Mean CPM Expression (log10)", title = "C19MC miRNA Expression \nHuman Placenta") +
+  scale_y_log10() +
+  facet_grid(. ~ week_8)
+#dev.off()
+
+```
 
 
 ```{r echo=FALSE}
 
-date <- Sys.Date()
+today <- Sys.Date()
 
 ```
 
-This R session was run on `r date`.
+This R session was run on `r format(today, format="%B %d %Y")`.
 
 ```{r}
 
