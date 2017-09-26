@@ -20,9 +20,9 @@ library(magrittr)
 
 # import placenta miRNA counts table from VM
 countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
-                             sep="\t", 
-                             header=T, 
-                             row.names="mirna")
+                             sep = "\t", 
+                             header = T, 
+                             row.names = "mirna")
 
 # remove the "_R1" and replace "Q" with "PAC" from the column names (eg Q006_S1_R1 becomes PAC006 to match the 'samples' data.frame) in the 'counts' data.frame
 names(countsPlacenta) = sub("_R1","",names(countsPlacenta)) 
@@ -31,13 +31,13 @@ names(countsPlacenta) = sub("_S.*","",names(countsPlacenta))
 # correct sample name mislabeled by QIAGEN
 names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
 # Reorder data.frame by columns
-countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing=FALSE)]
+countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing = FALSE)]
 
 # Import plasma miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
-                sep="\t",
-                header=T, 
-                row.names="mirna")
+                sep = "\t",
+                header = T, 
+                row.names = "mirna")
 
 # remove the "S#_R1_001" from the column names (eg PAC001_S1_R1_001 becomes PAC001 to match the 'samples' data.frame) in the 'counts' data.frame
 names(countsPlasma) = sub("_R1_001","",names(countsPlasma))
@@ -63,8 +63,8 @@ samples$group <- rep(NA, 48)
 
 # add new group 'Trimester 1 or 2' factor to each row based on gestation
 # Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
-samples$group <- ifelse(samples$gestation<=13, "Trimester_1", 
-                        ifelse(samples$gestation>=14, "Trimester_2", NA))
+samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
+                        ifelse(samples$gestation >= 14, "Trimester_2", NA))
 
 # group as factor
 samples$group <- as.factor(samples$group) 
@@ -89,7 +89,7 @@ mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
 
 ## Filter sequencing noise - Placenta
 
-Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
+Here any individual observation with less than five counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
   * Counts less than 5 reduced to 0
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
@@ -100,10 +100,10 @@ Here any individual observation with less than 5 counts is considered to be sequ
 countsPlacenta[countsPlacenta < 5] <- 0
 
 # check to establish if any miRNA have no expression across all samples
-table(rowSums(countsPlacenta==0) == 48)
+table(rowSums(countsPlacenta == 0) == 48)
 
 # remove miRNAs with zero counts in all samples
-countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta)!=0, ]
+countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta) != 0, ]
 
 ```
 
@@ -123,7 +123,7 @@ genes <- as.character(rownames(countsPlacenta)) %>%
   set_colnames("SYMBOL") 
 
 # new DGEList object for differential expression analysis
-DGEList_placenta <- DGEList(counts=countsPlacenta, samples=samples, genes = genes)
+DGEList_placenta <- DGEList(counts = countsPlacenta, samples = samples, genes = genes)
 
 
 ```
@@ -141,7 +141,7 @@ Prior to normalisation the placenta libraries are within a similar range, howeve
 library(edgeR)
 
 # calculate normalisation factors and apply to the DGEList object
-DGEList_placenta <- calcNormFactors(DGEList_placenta, method="TMM")
+DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 ```
 
@@ -167,7 +167,7 @@ b <- 7 # number of samples for filtering
 
 # remove low expressed miRNA 
 keep.exprs <- rowSums(rawCpm_placenta > a) >= b
-DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes=FALSE]
+DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes = FALSE]
 
 ```
 
@@ -176,20 +176,20 @@ DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes=FALSE]
 ## Filter sequencing noise - Plasma   
 
 Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
-* Counts less than 5 reduced to 0
-* Logic check and record how many miRs will be filtered
-* Filter to remove miRs with zero counts in all samples
+  * Counts less than 5 reduced to 0
+  * Logic check and record how many miRs will be filtered
+  * Filter to remove miRs with zero counts in all samples
 
 ```{r warning=FALSE, message=FALSE, error=FALSE}
 
-# exclude any individual count less or equal to than 10
+# exclude any individual count less or equal to than 5
 countsPlasma[countsPlasma <= 5] <- 0
 
 # check to establish if any miRNA have no expression across all samples
-table(rowSums(countsPlasma==0) == 48)
+table(rowSums(countsPlasma == 0) == 48)
 
 # remove miRNAs with zero counts in all samples
-countsPlasma <- countsPlasma[ rowSums(countsPlasma)!=0, ]
+countsPlasma <- countsPlasma[ rowSums(countsPlasma) != 0, ]
 
 ```
 
@@ -204,7 +204,7 @@ library(edgeR)
 library(tidyverse)
 
 # assign object to DGEList
-DGEList_plasma <- DGEList(counts=countsPlasma, samples=samples)
+DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
 
 ```
 
@@ -213,7 +213,6 @@ DGEList_plasma <- DGEList(counts=countsPlasma, samples=samples)
 Before differential expression analysis the sample libraries need to be normalised to account for differences in initial library size.     
 Normalising the libraries allows for the direct comparison between samples.   
 Here the Trimmed Mean of M Values method is used.   
-Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)
 
 ```{r warning=FALSE, message=FALSE, error=FALSE}
 
@@ -221,7 +220,7 @@ Prior to normalisation the placenta libraries are within a similar range, howeve
 library(edgeR)
 
 # calculate normalisation factors and apply to the DGEList object
-DGEList_plasma <- calcNormFactors(DGEList_plasma, method="TMM")
+DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 
 ```
 
@@ -247,13 +246,13 @@ x <- 1 # CPM for filtering
 z <- 30 # number of samples for filtering
 
 keep.exprs <- rowSums(rawCpm_plasma > x) >= z
-DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes=FALSE] 
+DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE] 
 
 ```
 
 # C19MC - Chromosome 19 miRNA mega cluster - *Placenta Specific Expression*
 
-## geom_line of C19MC placental miRNA in plasma
+## geom_line of C19MC placental miRNA in placenta
 
 ```{r}
 
@@ -283,7 +282,7 @@ up <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %in% c("hsa-miR-
   melt(., id = 'gestation')
 up$week_8 <- "up"
 
-# C19MC down in week 8
+# C19MC down in week 8 (placenta)
 down <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %in% c("hsa-miR-498", "hsa-miR-512-3p", "hsa-miR-515-5p", "hsa-miR-517a-5p", "hsa-miR-517c-3p", "hsa-miR-518a-5p", "hsa-miR-518c-5p", "hsa-miR-518e-3p", "hsa-miR-518e-5p", "hsa-miR-519a-3p", "hsa-miR-519a-5p", "hsa-miR-519d-3p", "hsa-miR-519d-5p", "hsa-miR-520a-3p", "hsa-miR-520a-5p", "hsa-miR-525-3p", "hsa-miR-525-5p", "hsa-miR-526a", "hsa-miR-526b-3p", "hsa-miR-526b-5p")) %>%
   as.data.frame() %>%
   t() %>%
@@ -303,7 +302,7 @@ aggregate_placenta <- aggregate(value ~ gestation + week_8 + variable, data = c1
 
 
 #pdf("~/down.pdf")
-ggplot(aggregate_placenta, aes(x=factor(aggregate_placenta$gestation), y=value, group = variable, colour = variable)) +
+ggplot(aggregate_placenta, aes(x = factor(aggregate_placenta$gestation), y = value, group = variable, colour = variable)) +
   geom_line() +
   labs(x = "Weeks' Gestation", y = "Mean CPM Expression (log10)", title = "C19MC miRNA Expression \nHuman Placenta") +
   scale_y_log10() +
