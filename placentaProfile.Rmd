@@ -21,9 +21,9 @@ library(pander)
 
 # import miRNA counts table from VM
 countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
-                             sep="\t", 
-                             header=T, 
-                             row.names="mirna")
+                             sep = "\t", 
+                             header = T, 
+                             row.names = "mirna")
 
 # remove the "_R1" and replace "Q" with "PAC" from the column names (eg Q006_S1_R1 becomes PAC006 to match the 'samples' data.frame) in the 'counts' data.frame
 names(countsPlacenta) = sub("_R1","",names(countsPlacenta)) 
@@ -32,7 +32,7 @@ names(countsPlacenta) = sub("_S.*","",names(countsPlacenta))
 # correct sample name mislabeled by QIAGEN
 names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
 # Reorder data.frame by columns
-countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing=FALSE)]
+countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing = FALSE)]
 
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
@@ -54,8 +54,8 @@ samples$group <- rep(NA, 48)
 
 # add new group 'Trimester 1 or 2' factor to each row based on gestation
 # Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
-samples$group <- ifelse(samples$gestation<=13, "Trimester_1", 
-                        ifelse(samples$gestation>=14, "Trimester_2", NA))
+samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
+                        ifelse(samples$gestation >= 14, "Trimester_2", NA))
 
 # group as factor
 samples$group <- as.factor(samples$group) 
@@ -72,10 +72,13 @@ fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female",
 
 samples <- left_join(samples, fetalSex, by = "samplename")
 
+# Import the mirbase chromosome information
+mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
+
 # summary tables
 pandoc.table(samples,
              caption = "Meta Data for all placenta samples",
-             split.table=Inf)
+             split.table = Inf)
 
 summary(samples$group)
 summary(samples$fetalSex)
@@ -141,10 +144,10 @@ Here any individual observation with less than 5 counts is considered to be sequ
 countsPlacenta[countsPlacenta < 5] <- 0
 
 # check to establish if any miRNA have no expression across all samples
-table(rowSums(countsPlacenta==0) == 48)
+table(rowSums(countsPlacenta == 0) == 48)
 
 # remove miRNAs with zero counts in all samples
-countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta)!=0, ]
+countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta) !=0, ]
 
 ```
 
@@ -187,12 +190,12 @@ library(RColorBrewer)
 nsamples <- ncol(DGEList_placenta)
 col <- brewer.pal(nsamples, "Paired")
 
-lcpm <- cpm(DGEList_placenta, log=TRUE)
-boxplot(lcpm, las=2, col=col, main="")
-title(main="Placenta: Un-normalised data",ylab="Log-cpm") 
+lcpm <- cpm(DGEList_placenta, log = TRUE)
+boxplot(lcpm, las = 2, col = col, main = "")
+title(main = "Placenta: Un-normalised data",ylab = "Log-cpm") 
 
 # calculate normalisation factors and apply to the DGEList object
-DGEList_placenta <- calcNormFactors(DGEList_placenta, method="TMM")
+DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 ```
 
@@ -258,19 +261,19 @@ filteredNonZero <-  t(numcolwise(nonzero)(filteredNonZero)) %>%
   tibble::rownames_to_column()
 
 #png("robustmiRNAPlacenta.png")
-ggplot(data=filteredNonZero, aes(x=rowname, y=V1, fill=samples$group)) +
-  geom_bar(stat="identity") +
+ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
+  geom_bar(stat = "identity") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in Placenta After Filtering") + 
-  geom_hline(yintercept=714,linetype="dashed") +
-  geom_text(aes(12, 750, label = "714 Total miRNA"), size = 3, colour = "black") +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in\nPlacenta After Filtering") + 
+  geom_hline(yintercep = 788,linetype = "dashed") +
+  geom_text(aes(12, 750, label = "788 Total miRNA"), size = 3, colour = "black") +
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
 # Distribution of normalised and filtered counts data
-lcpm <- cpm(DGEList_placenta, log=TRUE)
-boxplot(lcpm, las=2, col=col, main="")
-title(main="Placenta: Normalised data",ylab="Log-cpm")
+lcpm <- cpm(DGEList_placenta, log = TRUE)
+boxplot(lcpm, las = 2, col = col, main = "")
+title(main="Placenta: Normalised data",ylab = "Log-cpm")
 
 ```
 
@@ -326,7 +329,7 @@ pheatmap(expressionWithWeek,
          cluster_rows = TRUE,
          legend = TRUE,
          scale = "row",
-         main="log2 CPM Expression of Robust miRNA\nin Human Placenta",
+         main = "log2 CPM Expression of Robust miRNA\nin Human Placenta",
          show_rownames = FALSE,
          treeheight_row = 0)
 
@@ -575,9 +578,9 @@ ggplot(singleCounts_melt, aes(variable, miRNA)) +
   theme(plot.title = element_text(hjust = 0.5)) + 
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme(legend.position = "none") +
-  theme(axis.title.y=element_blank(),
+  theme(axis.title.y = element_blank(),
       axis.text.y = element_text((singleCounts_melt$rowname), size = 4)) +
-  coord_fixed(ratio=.5)
+  coord_fixed(ratio = .5)
 
 ```
 
@@ -606,7 +609,7 @@ pheatmap(as.matrix(oxygenMediatedExpression),
          color = c("darksalmon", "forestgreen"),
          border_color = "white",
          labels_col = c("Week 6", "Week 7", "Week 8", "Week 9", "Week 10", "Week 11", "Week 12", "Week 13", "Week 14", "Week 16"),
-         main="Binary Expression in Placenta")
+         main = "Binary Expression in Placenta")
 
 # cluster to obtain order for heatmap (default distance method = euclidean)
 clust <- hclust(dist(oxygenMediatedExpression))
@@ -632,97 +635,176 @@ ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
       axis.text.y = element_text(hypoxicCounts_melt$rowname)) +
   geom_vline(xintercept=3.55, colour = "white") + 
   geom_vline(xintercept=5.45, colour = "white") + 
-  coord_fixed(ratio=1)
+  coord_fixed(ratio = 1)
 
 ```
 
-## unique miRs by fetal sex (counts filtered to exclude miRs w/ < 2 samples per week showing expression)
+## unique miRs by fetal sex 
+
+  - The countsPlacenta object has been:
+    + filtered for sequencing noise (all counts < 5 reduced to 0)
+    + filtered for miRs with 0 counts in all samples (after the < 5 to 0 filter)
 
 ```{r warning=FALSE, error=FALSE}
 
+# select on the samplename and gestation (week) columns from the samples df
+sampleSex <- samples[, c(1, 9)] 
 
-sampleSex <- samples[, c(1, 9)] # select on the samplename and gestation (week) columns from the samples df
+# make a copy of the counts placenta object to increase filter
+sexCountsPlacenta <- countsPlacenta
 
-# new df of un-normalised counts
-countsBySex <- t(countsPlacenta) %>%
+# filter any counts < x by replacing with 0
+x <- 10
+sexCountsPlacenta[sexCountsPlacenta <= x] <- 0
+
+# remove miRNAs with zero counts in all samples
+sexCountsPlacenta <- sexCountsPlacenta[ rowSums(sexCountsPlacenta) !=0, ]
+
+# check to establish if any miRNA have no expression across all samples
+table(rowSums(sexCountsPlacenta == 0) == 48)
+
+# new df of un-normalised counts (sequencing noise already filtered)
+countsBySex <- t(sexCountsPlacenta) %>%
   as.data.frame() %>%
   tibble::rownames_to_column() # create a new transformed df of un-normalised counts with samplename as the first column
+# left join the samples and counts data
+countsBySex <- left_join(sampleSex, countsBySex, by = c("samplename" = "rowname"))
 
-countsBySex <- left_join(sampleSex, countsBySex, by = c("samplename" = "rowname")) # left join the samples and counts data
-countsBySex <- countsBySex[, -1] # remove unwanted samplename column
+# new df of samplename and sex columns
+leading <- countsBySex[, 1:2]
+# take out first two columns of samplename and sample sex
+countsBySex <- countsBySex[, -c(1, 2)]
+# replace all non zeros with one
+countsBySex[countsBySex > 0] <- 1
+# cbind the samplename and sex back onto the counts
+countsBySex <- cbind(leading, countsBySex)
 
+```
 
-countsBySex <- aggregate(countsBySex, by = list(countsBySex$Sex), FUN = mean)[, -2] %>%
-  rename(c('Group.1' = 'rowname')) %>%
-  tibble::column_to_rownames() # aggregate the counts df such that each week now only has a single observation per miR
+# subset expression by fetal sex
 
-countsBySex <- t(countsBySex) # new counts df all finished with weeks as column headers - counts are means within weeks
+```{r warning=FALSE, error=FALSE, message=FALSE}
 
-# Heat Map of binary expression by fetal sex - all non-zero counts converted to 1.
-countsBySex[which(countsBySex != 0)] <- 1
+# subset the female samples from counts - may end up with some zero counts
+allFemale <- dplyr::filter(countsBySex, Sex == "Female") %>%
+  rename(c('samplename' = 'rowname')) %>% 
+  tibble::column_to_rownames() %>%
+  select(-matches("Sex")) %>%
+  t() %>%
+  as.data.frame()
 
-# new df all miRs for each fetal sex 
-Female <- countsBySex[, "Female"] %>%
-  as.data.frame() %>%
+# miRNA must be expressed in min n female samples to be considered biologically relevant in female
+n <- 5
+biologicallyRelevantFemale <- allFemale[ rowSums(allFemale > 0) >= n, ] %>%
+  as.data.frame()
+
+# keep only rows (miRNA) whith zero expression in every sample
+zeroExpressionFemale <- allFemale[ rowSums(allFemale) == 0, ] %>%
+  as.data.frame()
+# pandoc.table(zeroExpressionFemale,
+#              caption = "miRNA with zero expression in female placenta",
+#              split.table = Inf)
+
+# keep only rows (miRNA) whith expression (may not be in every sample)
+ExpressionFemale <- allFemale[ !rowSums(allFemale) == 0, ] %>%
+  as.data.frame()
+
+# subset the male samples from counts - may end up with some zero counts
+allMale <- dplyr::filter(countsBySex, Sex == "Male") %>%
+  rename(c('samplename' = 'rowname')) %>% 
+  tibble::column_to_rownames() %>%
+  select(-matches("Sex")) %>%
+  t() %>%
+  as.data.frame()
+  
+# miRNA must be expressed in min n male samples to be considered biologically relevant in male
+biologicallyRelevantMale <- allMale[ rowSums(allMale > 0) >= n, ] %>%
+  as.data.frame()
+
+# keep only rows (miRNA) whith zero expression in every sample
+zeroExpressionMale <- allMale[ rowSums(allMale) == 0, ] %>%
+  as.data.frame() 
+# pandoc.table(zeroExpressionMale,
+#              caption = "miRNA with zero expression in male placenta",
+#              split.table = Inf)
+
+# keep only rows (miRNA) whith expression (may not be in every sample)
+ExpressionMale <- allMale[ !rowSums(allMale) == 0, ] %>%
+  as.data.frame()
+
+```
+
+# sex specific expression - female
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+zeroMale <- as.data.frame(rownames(zeroExpressionMale)) %>%
+  set_colnames("miRNA")
+
+allfemale <- allFemale %>%
   tibble::rownames_to_column() %>%
-  set_colnames(c("miRNA", "Female"))
-Female <- Female[!(Female$Female==0),]
+  rename(c('rowname' = 'miRNA'))
 
-Male <- countsBySex[, "Male"]  %>%
-  as.data.frame() %>%
+bioFemale <- as.data.frame(rownames(biologicallyRelevantFemale)) %>%
+  set_colnames("miRNA")
+
+femaleOnly <- semi_join(allfemale, zeroMale, by = "miRNA") %>%
+  rename(c('miRNA' = 'rowname')) %>%
+  tibble::column_to_rownames()
+
+femaleOnly$numberSamples <- as.data.frame(rowSums(femaleOnly))
+
+# what proportion of the female samples express the 'female specific' miRNA?
+proportionFemale <- (femaleOnly$numberSamples)/(ncol(femaleOnly)-1)
+
+(cbind(femaleOnly$numberSamples, proportionFemale) %>%
+    set_colnames(c("numberSamples", "proportionSamples")))
+
+# xtable(cbind(femaleOnly$numberSamples, proportionFemale) %>%
+#   set_colnames(c("numberSamples", "proportionSamples")))
+
+```
+
+# sex specific expression - male
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+zeroFem <- as.data.frame(rownames(zeroExpressionFemale)) %>%
+  set_colnames("miRNA")
+
+allmale <- allMale %>%
   tibble::rownames_to_column() %>%
-  set_colnames(c("miRNA", "Male"))
-Male <- Male[!(Male$Male==0),]
+  rename(c('rowname' = 'miRNA'))
 
-# miRNAs with ubiquitous expression (expressed in both male and female)
-ubiquitous <- countsBySex[ rowSums(countsBySex)==2, ] %>%
-  as.data.frame()
+bioMale <- as.data.frame(rownames(biologicallyRelevantMale)) %>%
+  set_colnames("miRNA")
 
-# miRNAs with sex specific expression (expressed in either male or female, but not both)
-sexSpecific <- countsBySex[ rowSums(countsBySex)==1, ] %>%
-  as.data.frame()
+maleOnly <- semi_join(allmale, zeroFem, by = "miRNA") %>%
+  rename(c('miRNA' = 'rowname')) %>%
+  tibble::column_to_rownames()
 
-pheatmap(sexSpecific[1:60,], 
-         cluster_cols = FALSE,
-         cluster_rows = TRUE,
-         cellwidth = 15, 
-         cellheight = 9,
-         legend_breaks = c(1, 0),
-         legend_labels = c("On", "Off"),
-         color = c("darksalmon", "forestgreen"),
-         border_color = "white",
-         treeheight_row = 0,
-         labels_col = c("Female", "Male"),
-         main="Binary Expression in\n Placenta by Fetal Sex")
+# How anyof the male samples express the 'male specific' miRNA
+maleOnly$numberSamples <- as.data.frame(rowSums(maleOnly)) 
 
-# simple df of miRNA expressed only in male samples
-maleOnly <- sexSpecific[, "Male", drop=FALSE] %>%
-  as.data.frame() %>%
-  set_colnames("Male")
-# remove miRNAs with zero counts in all samples
-maleOnly <- maleOnly[ rowSums(maleOnly)!=0, , drop = FALSE] %>%
-  as.data.frame()
+# what proportion of the male samples express the 'male specific' miRNA?
+proportionMale <- (maleOnly$numberSamples)/(ncol(maleOnly)-1)
 
-# simple df of miRNA expressed only in female samples
-femaleOnly <- sexSpecific[, "Female", drop=FALSE] %>%
-  as.data.frame() %>%
-  set_colnames("Female")
-# remove miRNAs with zero counts in all samples
-femaleOnly <-femaleOnly[ rowSums(femaleOnly)!=0, , drop = FALSE] %>%
-  as.data.frame()
+cbind(maleOnly$numberSamples, proportionMale) %>%
+  set_colnames(c("numberSamples", "proportionSamples"))
 
-mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
+# xtable(cbind(maleOnly$numberSamples, proportionMale) %>%
+#   set_colnames(c("numberSamples", "proportionSamples")))
 
 ```
 
 
 ```{r echo=FALSE}
 
-date <- Sys.Date()
+today <- Sys.Date()
 
 ```
 
-This R session was run on `r date`.
+This R session was run on `r format(today, format="%B %d %Y")`.
 
 ```{r}
 
