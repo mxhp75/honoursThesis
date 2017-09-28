@@ -13,6 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This step imports the raw counts data and samples metadata.
 
+### Import Count Data 
+
 ```{r message=FALSE, warning=FALSE, error=FALSE}
 
 library(tidyverse)
@@ -42,6 +44,12 @@ countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts
 # remove the "S#_R1_001" from the column names (eg PAC001_S1_R1_001 becomes PAC001 to match the 'samples' data.frame) in the 'counts' data.frame
 names(countsPlasma) = sub("_R1_001","",names(countsPlasma))
 names(countsPlasma) = sub("_S.*","",names(countsPlasma))
+
+```
+
+### Import Sample Meta Data 
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
