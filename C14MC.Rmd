@@ -1,0 +1,469 @@
+---
+title: "C14MC"
+author: "Melanie Smith"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import Counts and Sample Data
+
+### Import Count Data 
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
+
+# load required libraries
+library(plyr)
+library(reshape2)
+library(tidyverse)
+library(magrittr)
+library(pheatmap)
+library(edgeR)
+
+
+# import placenta miRNA counts table from VM
+countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
+                             sep = "\t", 
+                             header = T, 
+                             row.names = "mirna")
+
+# remove the "_R1" and replace "Q" with "PAC" from the column names (eg Q006_S1_R1 becomes PAC006 to match the 'samples' data.frame) in the 'counts' data.frame
+names(countsPlacenta) = sub("_R1","",names(countsPlacenta)) 
+names(countsPlacenta) = sub("Q","PAC",names(countsPlacenta))
+names(countsPlacenta) = sub("_S.*","",names(countsPlacenta))
+# correct sample name mislabeled by QIAGEN
+names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
+# Reorder data.frame by columns
+countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing = FALSE)]
+
+# Import plasma miRNA counts table from VM
+countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
+                sep = "\t",
+                header = T, 
+                row.names = "mirna")
+
+# remove the "S#_R1_001" from the column names (eg PAC001_S1_R1_001 becomes PAC001 to match the 'samples' data.frame) in the 'counts' data.frame
+names(countsPlasma) = sub("_R1_001","",names(countsPlasma))
+names(countsPlasma) = sub("_S.*","",names(countsPlasma))
+
+# meta data for miRNA IDs - includes chromosome name and location
+mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
+
+```
+
+### Import Sample Meta Data 
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
+
+# import the samples data from VM 
+samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
+  dplyr::select(-starts_with("X"))
+
+samples <- samples[,c(1, 12:16)] %>%
+  as.data.frame() %>%
+  set_colnames(c("samplename", "maternalAge", "gestation", "BMI", "smoker", "ethnicity")) %>% 
+  mutate(samplename = paste0("PAC",stringr::str_pad(samplename, width = 3, pad = "0")))
+
+# Remove the "+" from column 4 "gestation" nb: escape special character using \\
+samples$gestation <- gsub("\\+", "", samples$gestation)
+
+# reassign object classes
+samples$gestation <- as.integer(samples$gestation)
+
+# add new column named "group" into samples data.frame 
+samples$group <- rep(NA, 48)
+
+# add new group 'Trimester 1 or 2' factor to each row based on gestation
+# Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
+samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
+                        ifelse(samples$gestation >= 14, "Trimester_2", NA))
+
+# add new oxygenation factor to each row based on gestation
+# hypoxic = 6-9 wks, oxic = 10-26 wks
+samples$oxygenation <- ifelse(samples$gestation <= 9, "hypoxic", 
+                        ifelse(samples$gestation >= 10, "oxygenated", NA))
+
+
+samples <- as.data.frame(samples)
+
+```
+
+### Reasign object classes
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
+
+# group as factor
+samples$group <- as.factor(samples$group)
+
+# group as factor
+samples$oxygenation <- as.factor(samples$oxygenation) 
+
+
+```
+
+### Import and add fetal sex data to Sample Meta Data 
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
+
+# Add fetal sex to samples df
+fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
+  dplyr::select(-matches("gestation")) %>%
+  mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
+
+fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female", 
+                       ifelse(fetalSex$fetalSex == "XY", "Male", NA))
+
+samples <- left_join(samples, fetalSex, by = "samplename")
+
+```
+
+# Filter and Normalise placenta counts
+
+## Filter sequencing noise - Placenta
+
+Here any individual observation with less than five counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
+  * Counts less than 5 reduced to 0
+  * Logic check and record how many miRs will be filtered
+  * Filter to remove miRs with zero counts in all samples
+
+```{r warning=FALSE, message=FALSE}
+
+# exclude any individual count less than 5
+countsPlacenta[countsPlacenta < 5] <- 0
+
+# check to establish if any miRNA have no expression across all samples
+table(rowSums(countsPlacenta == 0) == 48)
+
+# remove miRNAs with zero counts in all samples
+countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta) != 0, ]
+
+```
+
+## Establish DGEList object - Placenta
+
+The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
+
+```{r message=FALSE, warning=FALSE}
+
+# new df of miRNA names for DGEList object
+genes <- as.character(rownames(countsPlacenta)) %>%
+  as.data.frame() %>%
+  set_colnames("SYMBOL") 
+
+# new DGEList object for differential expression analysis
+DGEList_placenta <- DGEList(counts = countsPlacenta, samples = samples, genes = genes)
+
+
+```
+
+## TMM normalisation of libraries - Placenta
+
+Before differential expression analysis the sample libraries need to be normalised to account for differences in initial library size.     
+Normalising the libraries allows for the direct comparison between samples.   
+Here the Trimmed Mean of M Values method is used.   
+Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
+
+```{r warning=FALSE}
+
+# calculate normalisation factors and apply to the DGEList object
+DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
+
+```
+
+## Filter biological noise - Placenta 
+
+Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 1 CPM in 7 or more samples is considered biologically relevant for this analysis.  
+
+```{r warning=FALSE, error=FALSE}
+
+# new df of unfiltered cpm for the reduced DGEList
+rawCpm_placenta <- cpm(DGEList_placenta)
+
+# new df of unfiltered log 2 cpm for the reduced DGEList
+rawlcpm_placenta <- cpm(DGEList_placenta, log = TRUE)
+
+# remove low expressed genes logical eg cpm >1 in >=20 samples (7 samples in the smallest group)
+a <- 1 # CPM for filtering
+b <- 7 # number of samples for filtering
+
+# remove low expressed miRNA 
+keep.exprs <- rowSums(rawCpm_placenta > a) >= b
+DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes = FALSE]
+
+```
+
+# Filter and Normalise plasma counts
+
+## Filter sequencing noise - Plasma   
+
+Here any individual observation with less than 5 counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
+  * Counts less than 5 reduced to 0
+  * Logic check and record how many miRs will be filtered
+  * Filter to remove miRs with zero counts in all samples
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# exclude any individual count less or equal to than 5
+countsPlasma[countsPlasma <= 5] <- 0
+
+# check to establish if any miRNA have no expression across all samples
+table(rowSums(countsPlasma == 0) == 48)
+
+# remove miRNAs with zero counts in all samples
+countsPlasma <- countsPlasma[ rowSums(countsPlasma) != 0, ]
+
+```
+
+## Establish DGEList object - Plasma
+
+The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# assign object to DGEList
+DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
+
+```
+
+## TMM normalisation of libraries
+
+Before differential expression analysis the sample libraries need to be normalised to account for differences in initial library size.     
+Normalising the libraries allows for the direct comparison between samples.   
+Here the Trimmed Mean of M Values method is used.   
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# calculate normalisation factors and apply to the DGEList object
+DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
+
+```
+
+## Filter biological noise - Plasma
+
+Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 1 CPM in 7 or more samples is considered biologically relevant for this analysis.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# new df of raw cpm for the reduced DGEList
+rawCpm_plasma <- cpm(DGEList_plasma)
+
+# new df of unfiltered log 2 cpm for the reduced DGEList
+rawlcpm_plasma <- cpm(DGEList_plasma, log = TRUE)
+
+# remove low expressed genes logical eg cpm >1 in >=20 samples (7 samples in the smallest group)
+x <- 1 # CPM for filtering
+z <- 7 # number of samples for filtering
+
+keep.exprs <- rowSums(rawCpm_plasma > x) >= z
+DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE] 
+
+```
+
+# C19MC - Chromosome 14 miRNA mega cluster - *Placenta Specific Expression*
+
+## Heatmap of C14MC placental miRNA in placenta - weeks' gestation as column names
+
+```{r}
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+cpmDGEList_placenta <- cpm(DGEList_placenta) %>%
+  as.data.frame()
+
+weeks <- samples[, c("samplename", "gestation")]
+
+# all observed C14MC cluster miRNA in placenta
+allC14MC_placenta <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %in% c("hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p")) %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(c('rowname' = 'samplename')) %>%
+  left_join(., weeks, by = 'samplename') %>%
+  select(., -samplename) %>%
+  arrange(., gestation) %>%
+  t()
+nrow_placenta <- nrow(allC14MC_placenta)
+nrow_placentaMinusOne <- nrow(allC14MC_placenta)-1
+allC14MC_placenta <- allC14MC_placenta[c(nrow_placenta, 1:nrow_placentaMinusOne), ]
+colnames(allC14MC_placenta) <-  allC14MC_placenta[1, ]
+allC14MC_placenta <-  allC14MC_placenta[-1, ] 
+
+# heat map - no annotation - includes weeks' as column names
+pdf("C14MC.pdf", height = 11, width = 15)
+pheatmap(as.matrix(allC14MC_placenta), 
+         cluster_cols = T,
+         cluster_rows = T,
+         scale = "row",
+         cellwidth = 15, 
+         cellheight = 10,
+         treeheight_row = 0,
+         cutree_cols = 3,
+         border_color = "white",
+         main = "C14MC Expression in Placenta")
+dev.off()
+
+```
+
+# Heat map C14MC miRNA with weeks as annotation - Placenta
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+lcpm_placenta <- cpm(DGEList_placenta, log = TRUE)
+
+# all observed C14MC cluster miRNA in plasma
+lcpm_placenta <- subset(lcpm_placenta, rownames(lcpm_placenta) %in% c("hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p")) %>%
+  as.data.frame()
+
+
+annotation <- data.frame(samples[, c(1, 3)]) %>%
+  set_colnames(c("rowname", "gestation")) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames() 
+
+#pdf("C14MCPlacenta.pdf", height = 11, width = 15)
+pheatmap(as.matrix(lcpm_placenta), 
+         annotation = annotation,
+         cluster_cols = T,
+         cluster_rows = T,
+         Legend = T,
+         cellwidth = 15, 
+         cellheight = 10,
+         show_colnames = F,
+         show_rownames = T,
+         treeheight_row = 0,
+         cutree_cols = 3,
+         border_color = "white",
+         main = "C14MC Expression in Placenta")
+#dev.off()
+
+
+```
+
+## heatmap of C14MC placental miRNA in plasma
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+cpmDGEList_plasma <- cpm(DGEList_plasma) %>%
+  as.data.frame()
+
+weeks <- samples[, c("samplename", "gestation")]
+
+# all observed C14MC miRNA in plasma
+allC14MC_plasma <- subset(cpmDGEList_plasma, rownames(cpmDGEList_plasma) %in% c("hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p")) %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(c('rowname' = 'samplename')) %>%
+  left_join(., weeks, by = 'samplename') %>%
+  select(., -samplename) %>%
+  arrange(., gestation) %>%
+  t()
+nrow_plasma <- nrow(allC14MC_plasma)
+nrow_plasmaMinusOne <- nrow(allC14MC_plasma)-1
+allC14MC_plasma <- allC14MC_plasma[c(nrow_plasma, 1:nrow_plasmaMinusOne), ]
+colnames(allC14MC_plasma) <-  allC14MC_plasma[1, ]
+allC14MC_plasma <-  allC14MC_plasma[-1, ] 
+
+
+#pdf("C14MCplasma.pdf", height = 11, width = 15)
+pheatmap(as.matrix(allC14MC_plasma), 
+         cluster_cols = T,
+         cluster_rows = T,
+         scale = "row",
+         cellwidth = 15, 
+         cellheight = 10,
+         treeheight_row = 0,
+         cutree_cols = 3,
+         border_color = "white",
+         main = "C14MC Expression in Maternal Plasma")
+#dev.off()
+
+```
+
+# Heat map C14MC miRNA with weeks as annotation - Placenta
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+lcpm_plasma <- cpm(DGEList_plasma, log = TRUE)
+
+# all observed C14MC cluster miRNA in plasma
+lcpm_plasma <- subset(lcpm_plasma, rownames(lcpm_plasma) %in% c("hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p")) %>%
+  as.data.frame()
+
+
+annotation <- data.frame(samples[, c(1, 3)]) %>%
+  set_colnames(c("rowname", "gestation")) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames() 
+
+#pdf("C14MCPlasma.pdf", height = 11, width = 15)
+pheatmap(as.matrix(lcpm_plasma), 
+         annotation = annotation,
+         cluster_cols = T,
+         cluster_rows = T,
+         Legend = T,
+         cellwidth = 15, 
+         cellheight = 10,
+         show_colnames = F,
+         show_rownames = T,
+         treeheight_row = 0,
+         cutree_cols = 3,
+         border_color = "white",
+         main = "C14MC Expression in Maternal Plasma")
+#dev.off()
+
+
+```
+
+## geom_line of C14MC placental miRNA in placenta
+
+```{r}
+
+# mirbase <- mirbase_db[,7] %>%
+#   as.data.frame() %>%
+#   filter(., seqnames == "chr14") %>%
+#   subset(., Name %in% c("hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p")) %>%
+#   arrange(., Name)
+#   
+# mirbase <- mirbase[c(-4, -6, -10, -12, -19, -28), ] %>%
+#   arrange(., start)
+#   
+# 
+# mirbase$rank <- NA
+# mirbase$rank <- 1:nrow(mirbase)
+# 
+# mirbase <- mirbase[, 6:7] %>%
+#   rename(c('Name' = 'rowname'))
+# 
+# allC14MC_placenta <- as.data.frame(allC19MC_placenta) 
+# allC14MC_placenta$rowname <- rownames(allC19MC_placenta) %>%
+#   as.data.frame()
+# 
+# 
+# mirbase <- left_join(mirbase, allC19MC_placenta, by = 'rowname')
+
+```
+
+
+```{r}
+
+today <- Sys.Date()
+
+```
+
+This R session was run on `r format(today, format="%B %d %Y")`.
+
+```{r}
+
+sessionInfo()
+
+```
