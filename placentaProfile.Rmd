@@ -2,7 +2,10 @@
 title: "placentaProfile"
 author: "Melanie Smith"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: html_document
+output:
+html_document:
+fig_width: 6
+fig_height: 4
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 # Import Counts and Sample Data
 
 This step imports the raw counts data and samples metadata and reports some summary information.
+
+### Import Count Data
 
 ```{r message=FALSE, warning=FALSE, error=FALSE}
 
@@ -30,9 +35,15 @@ names(countsPlacenta) = sub("_R1","",names(countsPlacenta))
 names(countsPlacenta) = sub("Q","PAC",names(countsPlacenta))
 names(countsPlacenta) = sub("_S.*","",names(countsPlacenta))
 # correct sample name mislabeled by QIAGEN
-names(countsPlacenta) = sub("PAC033","PAC038",names(countsPlacenta))
+names(countsPlacenta) = sub("PAC033", "PAC038", names(countsPlacenta))
 # Reorder data.frame by columns
-countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta),decreasing = FALSE)]
+countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta), decreasing = FALSE)]
+
+```
+
+### Import Sample Meta Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
@@ -57,12 +68,22 @@ samples$group <- rep(NA, 48)
 samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
                         ifelse(samples$gestation >= 14, "Trimester_2", NA))
 
+```
+
+### Reassign object classes
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
 # group as factor
 samples$group <- as.factor(samples$group) 
 
 samples <- as.data.frame(samples)
 
-# Add fetal sex to samples df
+```
+
+### Import and add fetal sex data to Sample Meta Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
   dplyr::select(-matches("gestation")) %>%
   mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
@@ -72,8 +93,12 @@ fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female",
 
 samples <- left_join(samples, fetalSex, by = "samplename")
 
-# Import the mirbase chromosome information
-mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
+
+```
+
+### Summary Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 
 # summary tables
 pandoc.table(samples,
@@ -218,7 +243,7 @@ rawCpm_placenta <- cpm(DGEList_placenta)
 # new df of unfiltered log 2 cpm for the reduced DGEList
 rawlcpm_placenta <- cpm(DGEList_placenta, log = TRUE)
 
-# remove lowly expressed genes 
+# remove low expressed genes 
 keep.exprs <- rowSums(rawCpm_placenta > 1) >= 7
 DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes=FALSE]
 
@@ -265,7 +290,7 @@ ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
   geom_bar(stat = "identity") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in\nPlacenta After Filtering") + 
-  geom_hline(yintercep = 788,linetype = "dashed") +
+  geom_hline(yintercept = 788, linetype = "dashed") +
   geom_text(aes(12, 750, label = "788 Total miRNA"), size = 3, colour = "black") +
   scale_fill_discrete(name = "Trimester")
 #dev.off()
@@ -323,15 +348,55 @@ expressionWithWeek <- as.data.frame(t(lcpm)) %>%
   as.data.frame() 
 expressionWithWeek <- expressionWithWeek[-1, ]
 
+# make colour pallete for heatmap
+m <- matrix(c(rnorm(1000)), ncol=100)
+distmat <- dist(t(m))
+
+makeColorRampPalette <- function(colors, cutoff.fraction, num.colors.in.palette)
+{
+  stopifnot(length(colors) == 4)
+  ramp1 <- colorRampPalette(colors[1:2])(num.colors.in.palette * cutoff.fraction)
+  ramp2 <- colorRampPalette(colors[3:4])(num.colors.in.palette * (1 - cutoff.fraction))
+  return(c(ramp1, ramp2))
+}
+
+cutoff.distance <- 3  
+cols <- makeColorRampPalette(c("black", "blue", "lightblue", "white"),
+                             cutoff.distance / max(distmat),
+                             100)
+
 # create heatmap of all robust miRNA using lcpm expression
 pheatmap(expressionWithWeek,
-         cluster_cols = FALSE, 
+         color = cols,
+         cluster_cols = TRUE, 
          cluster_rows = TRUE,
-         legend = TRUE,
          scale = "row",
+         legend = TRUE,
          main = "log2 CPM Expression of Robust miRNA\nin Human Placenta",
          show_rownames = FALSE,
+         cutree_col = 4,
+         cutree_rows = 2,
          treeheight_row = 0)
+
+
+annotation <- data.frame(samples[, c(1, 3)]) %>%
+  set_colnames(c("rowname", "gestation")) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames() 
+
+#pdf("heat.pdf", height = 11, width = 6)
+pheatmap(lcpm, 
+         annotation = annotation,
+         cluster_cols = T,
+         cluster_rows = T,
+         main = "log2 CPM Expression of Robust miRNA\nin Human Placenta",
+         legend = T,
+         show_rownames = F,
+         show_colnames = F,
+         cutree_col = 4,
+         treeheight_row = 0)
+#dev.off()
+
 
 ```
 
@@ -358,7 +423,9 @@ theme_set(theme_bw())
 
 # exclude any individual count less than 5
 #countsPlacenta[countsPlacenta < 5] <- 0
-sampleWeek <- samples[, c(1, 3)] # select on the samplename and gestation (week) columns from the samples df
+
+# select on the samplename and gestation (week) columns from the samples df
+sampleWeek <- samples[, c(1, 3)] 
 
 # create a new transformed df of un-normalised counts with samplename as the first column
 countsByWeek <- t(countsPlacenta) %>%
