@@ -279,8 +279,8 @@ ggplot(data=filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
   geom_bar(stat = "identity") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(x = "Sample Name", y = "Count of Unique miRNAs Identified", title = "Count Robust miRNAs in Plasma") + 
-  geom_hline(yintercept = 542,linetype = "dashed") +
-  geom_text(aes(20, 560, label = "542 Total miRNA"), size = 4, colour = "black") +
+  geom_hline(yintercept = 676,linetype = "dashed") +
+  geom_text(aes(20, 700, label = "676 Total miRNA"), size = 4, colour = "black") +
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
