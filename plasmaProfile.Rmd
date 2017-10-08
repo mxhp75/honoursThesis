@@ -2,7 +2,10 @@
 title: "plasmaProfile"
 author: "Melanie Smith"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: html_document
+output:
+html_document:
+fig_width: 6
+fig_height: 4
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 # Import Counts and Sample Data
 
 This step imports the raw counts data and samples metadata and reports some summary information.
+
+### Import Count Data
 
 ```{r message=FALSE, warning=FALSE, error=FALSE}
 
@@ -29,6 +34,11 @@ countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts
 names(countsPlasma) = sub("_R1_001","",names(countsPlasma))
 names(countsPlasma) = sub("_S.*","",names(countsPlasma))
 
+```
+
+### Import Sample Meta Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
   dplyr::select(-starts_with("X"))
@@ -52,10 +62,21 @@ samples$group <- rep(NA, 48)
 samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
                         ifelse(samples$gestation >= 14, "Trimester_2", NA))
 
-# group as factor
+```
+
+### Reassign object classes
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
 samples$group <- as.factor(samples$group) 
 
 samples <- as.data.frame(samples)
+
+```
+
+### Import and add fetal sex data to Sample Meta Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 
 # Add fetal sex to samples df
 fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
@@ -67,8 +88,11 @@ fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female",
 
 samples <- left_join(samples, fetalSex, by = "samplename")
 
-# Import the mirbase chromosome information
-mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
+```
+
+### Summary Data
+
+```{r message=FALSE, warning=FALSE, error=FALSE}
 
 # summary tables
 pandoc.table(samples,
@@ -206,7 +230,7 @@ rawCpm_plasma <- cpm(DGEList_plasma)
 rawlcpm_plasma <- cpm(DGEList_plasma, log = TRUE)
 
 x <- 1 # CPM for filtering
-z <- 30 # number of samples for filtering
+z <- 7 # number of samples for filtering
 
 # remove low expressed miRNAs logical eg cpm >1 in >=30 samples (7 samples in the smallest group)
 keep.exprs <- rowSums(rawCpm_plasma > x) >= z
@@ -297,7 +321,7 @@ pandoc.table(expressionPlasmaTop20)
 
 library(pheatmap)
 
-lcpm <- cpm(DGEList_plasma, log - TRUE)
+lcpm <- cpm(DGEList_plasma, log = TRUE)
 
 # df with sample name and weeks only
 weeks <- samples[, c("samplename", "gestation")]
@@ -324,6 +348,26 @@ pheatmap(expressionWithWeek,
          main = "log2 CPM Expression of Robust miRNA\nin Maternal Plasma",
          show_rownames = FALSE,
          treeheight_row = 0)
+
+# Heat map with weeks as annotation
+
+annotation <- data.frame(samples[, c(1, 3)]) %>%
+  set_colnames(c("rowname", "gestation")) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames() 
+
+#pdf("heat_plasma.pdf", height = 11, width = 6)
+pheatmap(lcpm, 
+         annotation = annotation,
+         cluster_cols = T,
+         cluster_rows = T,
+         main = "log2 CPM Expression of Robust miRNA\nin Maternal Plasma",
+         legend = T,
+         show_rownames = F,
+         show_colnames = F,
+         cutree_col = 4,
+         treeheight_row = 0)
+#dev.off()
 
 ```
 
