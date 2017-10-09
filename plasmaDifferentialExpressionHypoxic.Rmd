@@ -1,0 +1,363 @@
+---
+title: "plasmaDifferentialExpressionHypoxic"
+author: "Melanie Smith"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import Counts and Sample Data
+
+This step imports the raw counts data and samples metadata and reports some summary information.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# load required libraries
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(reshape2)
+library(pander)
+library(magrittr)
+library(RColorBrewer)
+library(edgeR)
+library(limma)
+
+# import miRNA counts table from VM
+countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
+                sep = "\t",
+                header = T, row.names = "mirna")
+
+# remove the "S#_R1_001" from the column names (eg PAC001_S1_R1_001 becomes PAC001 to match the 'samples' data.frame) in the 'counts' data.frame
+names(countsPlasma) = sub("_R1_001","",names(countsPlasma))
+names(countsPlasma) = sub("_S.*","",names(countsPlasma))
+
+#saveRDS(countsPlasma, "countsPlasma.rds")
+
+```
+
+# import the samples data from VM 
+
+```{r}
+
+samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
+  dplyr::select(-starts_with("X"))
+
+samples <- samples[,c(1, 12:16)] %>%
+  as.data.frame() %>%
+  set_colnames(c("samplename", "maternalAge", "gestation", "BMI", "smoker", "ethnicity")) %>% 
+  mutate(samplename = paste0("PAC",stringr::str_pad(samplename, width = 3, pad = "0")))
+
+# Remove the "+" from column 4 "gestation" nb: escape special character using \\
+samples$gestation <- gsub("\\+", "", samples$gestation)
+
+# reassign object classes
+samples$gestation <- as.integer(samples$gestation)
+
+# add new column named "group" into samples data.frame 
+samples$group <- rep(NA, 48)
+
+# add new group 'Trimester 1 or 2' factor to each row based on gestation
+# Trimester 1 = 6-13 wks, Trimester 2 = 14-26 wks
+samples$group <- ifelse(samples$gestation <= 13, "Trimester_1", 
+                        ifelse(samples$gestation >= 14, "Trimester_2", NA))
+
+# group as factor
+samples$group <- as.factor(samples$group)
+
+# add new oxygenation factor to each row based on gestation
+# hypoxic = 6-9 wks, oxic = 10-26 wks
+samples$oxygenation <- ifelse(samples$gestation <= 9, "hypoxic", 
+                        ifelse(samples$gestation >= 10, "oxygenated", NA))
+
+# group as factor
+samples$oxygenation <- as.factor(samples$oxygenation) 
+
+samples <- as.data.frame(samples)
+
+# Add fetal sex to samples df
+fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
+  dplyr::select(-matches("gestation")) %>%
+  mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
+
+fetalSex$Sex <- ifelse(fetalSex$fetalSex == "XX" , "Female", 
+                       ifelse(fetalSex$fetalSex == "XY", "Male", NA))
+
+samples <- left_join(samples, fetalSex, by = "samplename")
+
+```
+
+### Plot to visualise the pre filtered, unique miRNA population between samples in Maternal Plasma
+
+From the raw counts we can see that there is a large difference in the number of unique miRNAs identified between samples. Of the 1571 unique miRNAs identified, samples vary between 355 and 973 miRNA. The population of miRNAs varies between samples.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+# count the number of 'non-zero' (ie expressed) miRNAs for each sample before filtering
+nonzero <- function(x) sum(x != 0)
+rawNonZero <- numcolwise(nonzero)(countsPlasma)
+rawNonZero <- t(rawNonZero) %>%
+  as.data.frame()
+rawNonZero <- tibble::rownames_to_column(rawNonZero) %>%
+  set_colnames(c("samplename", "rawmiRNA")) %>%
+  as.data.frame()
+
+#png("rawmiRNAPlasma.png")
+ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA, fill = samples$group)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of Unique miRNAs Identified", title = "Count of pre-filtered miRNAs in Plasma") + 
+  geom_hline(yintercept=1571,linetype = "dashed") +
+  geom_text(aes(18, 1600, label = "1571 Total miRNA"), size = 4, colour = "black") +
+  scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+```
+
+# Filter sequencing noise   
+
+Here any individual observation with less than five counts is considered to be sequencing noise and is reduced to zero and removed by filtering.  
+  * Counts less than 5 reduced to 0
+  * Logic check and record how many miRs will be filtered
+  * Filter to remove miRs with zero counts in all samples
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# exclude any individual count less or equal to than 10
+countsPlasma[countsPlasma <= 5] <- 0
+
+# check to establish if any miRNA have no expression across all samples
+table(rowSums(countsPlasma == 0) == 48)
+
+# remove miRNAs with zero counts in all samples
+countsPlasma <- countsPlasma[ rowSums(countsPlasma) !=0, ]
+
+
+```
+
+After filtering out the sequencing noise (sequence counts with low confidence) we are left with 1453 unique miRNAs (118 are filtered as sequence noise.
+
+# Establish DGEList object
+
+The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# assign object to DGEList
+DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
+
+```
+
+# TMM normalisation of libraries
+
+Before differential expression analysis the sample libraries need to be normalised to account for differences in initial library size.     
+Normalising the libraries allows for the direct comparison between samples.   
+Here the Trimmed Mean of M Values method is used.   
+Prior to normalisation the plasma libraries are not within a similar range. The mean of counts is small and centered around -5 CPM (log2) for the majority of samples.
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# Calculate and visualise normalisation factors
+nsamples <- ncol(DGEList_plasma)
+col <- brewer.pal(nsamples, "Paired")
+
+lcpm <- cpm(DGEList_plasma, log = TRUE)
+boxplot(lcpm, las = 2, col = col, main = "")
+title(main = "Maternal Plasma: Un-normalised data",ylab = "Log-cpm") 
+
+# calculate normalisation factors and apply to the DGEList object
+DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
+
+#saveRDS(DGEList_plasma, "normDGEList_plasma.rds")
+
+# vector of normalisation factors if required
+#DGEList_plasma$samples$norm.factors 
+
+```
+
+# Filter biological noise and plot 
+
+Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of greater than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2). 
+
+```{r warning=FALSE, message=FALSE, error=FALSE}
+
+# set ggplot theme
+theme_set(theme_bw())
+
+# new df of raw cpm for the reduced DGEList
+rawCpm_plasma <- cpm(DGEList_plasma)
+
+# new df of unfiltered log 2 cpm for the reduced DGEList
+rawlcpm_plasma <- cpm(DGEList_plasma, log = TRUE)
+
+# remove low expressed genes logical eg cpm >1 in >=20 samples (7 samples in the smallest group)
+x <- 1 # CPM for filtering
+z <- 30 # number of samples for filtering
+
+keep.exprs <- rowSums(rawCpm_plasma > x) >= z
+DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE] 
+
+## The density of log-CPM values for raw pre-filtered data (A) and post-filtered data (B) are shown for each sample. 
+## Dotted vertical lines mark the log-CPM of zero threshold (equivalent to a CPM value of 1) used in the filtering step.
+
+# Density plot of unfiltered lcpm counts
+nsamples <- ncol(DGEList_plasma)
+col <- brewer.pal(nsamples, "Paired")
+par(mfrow=c(1,2))
+plot(density(rawlcpm_plasma[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
+  main = "", xlab = "")
+title(main = "A. Unfiltered data", xlab = "Log-cpm") 
+abline(v = 2, lty = 3)
+for (i in 1:nsamples){
+  den <- density(rawlcpm_plasma[,i])
+  lines(den$x, den$y, col = col[i], lwd = 2)
+}
+#legend("topright", legend=samples$samplename, text.col=col, bty="n")
+
+
+# Density plot of filtered lcpm counts
+lcpm <- cpm(DGEList_plasma, log = TRUE)
+plot(density(lcpm[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
+  main = "", xlab = "")
+title(main = "B. Filtered data", xlab = "Log-cpm") 
+abline(v = 2, lty = 3)
+for (i in 1:nsamples){
+  den <- density(lcpm[,i])
+lines(den$x, den$y, col = col[i], lwd = 2)
+}
+#legend("topright", legend=samples$samplename, text.col = col, bty = "n")
+
+par(mfrow=c(1, 1))
+
+# plot of filtered library sizes
+lcpm <- cpm(DGEList_plasma, log = TRUE)
+boxplot(lcpm, las = 2, col = col, main = "")
+title(main = "Maternal Plasma: Normalised data",ylab = "Log-cpm")
+
+# Plot filtered library sizes against total miRNA
+# count the number of 'non-zero' (ie expressed) miRNAs for each sample before filtering
+filteredNonZero <- (DGEList_plasma[[1]]) %>%
+  as.data.frame()
+  
+filteredNonZero <-  numcolwise(nonzero)(filteredNonZero)
+filteredNonZero <- t(filteredNonZero) %>%
+  as.data.frame()
+filteredNonZero <- tibble::rownames_to_column(filteredNonZero)
+
+#png("robustmiRNAPlasma.png")
+ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in Plasma") + 
+  geom_hline(yintercept=542,linetype = "dashed") +
+  geom_text(aes(20, 560, label = "542 Total miRNA"), size = 4, colour = "black") +
+  scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+```
+
+# MDS Plots
+
+The multidimensional scaling plots create a temp. log fold change between pairs.   
+Here we see that the Leading logFC on dimension 1 and 2 fails to seperate the samples by trimester.
+
+```{r}
+
+lcpm <- cpm(DGEList_plasma, log = TRUE, prior.count = 1)
+
+col.group <- samples$group
+levels(col.group) <- brewer.pal(nlevels(col.group), "Set1") 
+col.group <- as.character(col.group)
+
+plotMDS(lcpm, labels = samples$samplename, col = col.group, dim = c(1, 2))
+title(main = "Maternal Plasma: Multi Dimensional Scaling Plot")
+
+```
+
+# Differential Expression Analysis - Oxygenation Point 
+  * Differential Expression between hypoxic and oxygenated placenta - maternal plasma
+    + Here the design matrix treats gestation as a discrete variable with levels "Hypoxic" and "Oxygenated".
+
+```{r}
+
+par(mfrow=c(1,1))
+
+# set ggplot2 theme
+theme_set(theme_bw())
+
+design <- model.matrix(~ oxygenation + Sex, data = samples)
+cont.mat <- c(0, 1, 0) 
+# position 1=intercept, position 2=group, position 3=sex
+# when looking at trimester differences c(0,1,0)
+# when looking at sex differences c(0,0,1)
+
+v <- voomWithQualityWeights(DGEList_plasma, design, plot = TRUE)
+
+fit <- lmFit(v, design)
+fit <- contrasts.fit(fit, cont.mat)
+fit <- eBayes(fit) # moderated t-test
+summary(decideTests(fit))
+topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
+plotMD(fit, main = "Maternal Plasma: Mean Difference Plot\nOxygenation")
+
+summary(lmFit)
+
+```
+
+## Volcano plot for visualisation of differential expression by oxygen state
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+
+decide <- decideTests(fit)
+
+d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(topTable)] <- 1
+d2$threshold <- as.factor(d2$threshold)
+
+d3 <- decideTests(fit) %>%
+  as.data.frame
+d3 <- d3[1]
+
+d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by = "rowname")
+d4$V1 <- as.factor(d4$V1)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+
+colour <- c("red", "black", "darkgreen")
+
+#pdf("deHypoxic_plasma.pdf", width = 6, height = 6)
+ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
+  geom_point(alpha = 0.8, size = 2.00) +
+  xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
+  ggtitle("Oxygen Based Differential Expression of \nmiRNA in Maternal Plasma") + 
+  scale_color_manual(values = colour, name="miRNA\nRegulation\n(Oxygenated)",
+                         breaks = c("-1", "0", "1"),
+                         labels = c("Down-regulated", "Deregulated", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 1.371611, linetype = "dashed")
+#dev.off()
+
+#rm(list = c("d2","d3","d4"))
+
+```
+
+```{r echo=FALSE}
+
+today <- Sys.Date()
+
+```
+
+This R session was run on `r format(today, format="%B %d %Y")`.
+
+```{r}
+
+sessionInfo()
+
+```
+
