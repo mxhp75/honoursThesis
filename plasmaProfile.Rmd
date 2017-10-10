@@ -20,9 +20,16 @@ This step imports the raw counts data and samples metadata and reports some summ
 
 ```{r message=FALSE, warning=FALSE, error=FALSE}
 
+# load required libraries
+library(plyr)
+library(dplyr)
 library(tidyverse)
-library(magrittr)
+library(reshape2)
 library(pander)
+library(magrittr)
+library(RColorBrewer)
+library(edgeR)
+library(limma)
 
 # Import plasma miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
@@ -118,10 +125,6 @@ From the raw counts we can see that is considerable difference in the number of 
 
 ```{r warning=FALSE, error=FALSE, message=FALSE}
 
-library(tidyverse)
-library(magrittr)
-library(dplyr)
-
 # set ggplot2 theme
 theme_set(theme_bw())
 
@@ -178,10 +181,6 @@ The counts and samples data can now be combined into a single list object for us
 
 ```{r message=FALSE, warning=FALSE}
 
-# load required Libraries
-library(edgeR)
-library(tidyverse)
-
 # assign object to DGEList
 DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
 
@@ -195,8 +194,6 @@ Here the Trimmed Mean of M Values method is used.
 Prior to normalisation the plasma libraries are within a similar range, however the mean of counts is small and centered around -5 CPM (log2)   
 
 ```{r warning=FALSE}
-
-library(RColorBrewer)
 
 # Calculate and visualise normalisation factors
 nsamples <- ncol(DGEList_plasma)
@@ -215,10 +212,6 @@ DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 1 CPM in 30 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 30) is chosen to attempt to overcome the large differences in library sizes. Using a samples cut off lower than 30 fails to adequately change the distribution of counts.   
 
 ```{r warning=FALSE, error=FALSE}
-
-library(plyr)
-library(tidyverse)
-library(edgeR)
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -315,11 +308,33 @@ pandoc.table(expressionPlasmaTop20)
 
 ```
 
+### table - top 100 miRNA in Maternal Plasma by mean expression value (CPM)
+
+```{r}
+
+# create expression DF for normalised plasma counts
+expressionPlasma <- cpm(DGEList_plasma$counts) %>%
+  as.data.frame()
+
+# subset the top 20 highly expressed miRs by the sum of expression over all samples.
+expressionPlasmaTop100 <- expressionPlasma[order(rowMeans(expressionPlasma), decreasing = TRUE), ] %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("miRNAs") %>%
+  as.data.frame() %>%
+  dplyr::slice(., 1:100) %>% 
+  mutate(meanCPM = rowMeans(.[grep("^PAC", names(.))])) %>%
+  select(., -matches("PAC"))
+expressionPlasmaTop100$Tissue <- "Plasma"
+# expressionPlasmaTop20$TissueSpecificity <- "unknown"
+# expressionPlasmaTop20$PregnancySpecificity <- "unknown"
+
+saveRDS(expressionPlasmaTop100, "plasma_100.rds")
+
+```
+
 ## Heatmap of lcpm expression in Maternal Plasma (all robust miRs)
 
 ```{r warning=FALSE, error=FALSE, message=FALSE}
-
-library(pheatmap)
 
 lcpm <- cpm(DGEList_plasma, log = TRUE)
 
@@ -384,10 +399,6 @@ This code chunk is written to:
 nb: this analysis uses the countsPlasma object which has been filtered for sequencing noise (raw counts < 5 -> 0). The counts have not been filtered for low expression, and have not been normalised. I consider this acceptable as the filter for minimum representation (2 samples in any week) has been applied, and the counts are only considered as a binary (on/off) varible such that the actual expression values are not relevant.
 
 ```{r warning=FALSE, error=FALSE}
-
-library(tidyverse)
-library(reshape2)
-library(pheatmap)
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -695,7 +706,7 @@ sampleSex <- samples[, c(1, 9)]
 sexCountsPlasma <- countsPlasma
 
 # filter any counts < x by replacing with 0
-x <- 10
+x <- 5
 sexCountsPlasma[sexCountsPlasma <= x] <- 0
 
 # remove miRNAs with zero counts in all samples
