@@ -20,9 +20,16 @@ This step imports the raw counts data and samples metadata and reports some summ
 
 ```{r message=FALSE, warning=FALSE, error=FALSE}
 
+# load required libraries
+library(plyr)
+library(dplyr)
 library(tidyverse)
-library(magrittr)
+library(reshape2)
 library(pander)
+library(magrittr)
+library(RColorBrewer)
+library(edgeR)
+library(limma)
 
 # import miRNA counts table from VM
 countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
@@ -124,10 +131,6 @@ From the raw counts we can see that there is not a lot of difference in the numb
 
 ```{r warning=FALSE, error=FALSE, message=FALSE}
 
-library(tidyverse)
-library(magrittr)
-library(dplyr)
-
 # set ggplot2 theme
 theme_set(theme_bw())
 
@@ -184,10 +187,6 @@ The counts and samples data can now be combined into a single list object for us
 
 ```{r message=FALSE, warning=FALSE}
 
-# load required Libraries
-library(edgeR)
-library(tidyverse)
-
 # new df of miRNA names for DGEList object
 genes <- as.character(rownames(countsPlacenta)) %>%
   as.data.frame() %>%
@@ -209,8 +208,6 @@ Prior to normalisation the placenta libraries are within a similar range, howeve
 
 ```{r warning=FALSE}
 
-library(RColorBrewer)
-
 # Distribution of un-normalised counts 
 nsamples <- ncol(DGEList_placenta)
 col <- brewer.pal(nsamples, "Paired")
@@ -229,10 +226,6 @@ DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2).   
 
 ```{r warning=FALSE, error=FALSE}
-
-library(plyr)
-library(tidyverse)
-library(edgeR)
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -326,11 +319,34 @@ pandoc.table(expressionPlacentaTop20)
 
 ```
 
+### table - top 100 miRNA in placenta by mean expression value (CPM)
+
+```{r}
+
+# create expression DF for normalised placenta counts
+expressionPlacenta <- cpm(DGEList_placenta$counts) %>%
+  as.data.frame()
+
+# subset the top 20 highly expressed miRs by the sum of expression over all samples.
+expressionPlacentaTop100 <- expressionPlacenta[order(rowMeans(expressionPlacenta), decreasing = TRUE), ] %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("miRNAs") %>%
+  as.data.frame() %>%
+  dplyr::slice(., 1:100) %>% 
+  mutate(meanCPM = rowMeans(.[grep("^PAC", names(.))])) %>%
+  select(., -matches("PAC"))
+expressionPlacentaTop100$Tissue <- "Placenta"
+# expressionPlacentaTop20$TissueSpecificity <- "unknown"
+# expressionPlacentaTop20$PregnancySpecificity <- "unknown"
+
+saveRDS(expressionPlacentaTop100, "placenta_100.rds")
+
+
+```
+
 ## Heatmap of lcpm expression in placenta (all robust miRs)
 
 ```{r warning=FALSE, error=FALSE, message=FALSE}
-
-library(pheatmap)
 
 # df with sample name and weeks only
 weeks <- samples[, c("samplename", "gestation")]
@@ -384,7 +400,7 @@ annotation <- data.frame(samples[, c(1, 3)]) %>%
   as.data.frame() %>%
   tibble::column_to_rownames() 
 
-#pdf("heat.pdf", height = 11, width = 6)
+pdf("heat_placenta.pdf", height = 11, width = 6)
 pheatmap(lcpm, 
          annotation = annotation,
          cluster_cols = T,
@@ -395,14 +411,14 @@ pheatmap(lcpm,
          show_colnames = F,
          cutree_col = 4,
          treeheight_row = 0)
-#dev.off()
+dev.off()
 
 
 ```
 
 # Time switching miRs
 
-## unique miRs by week counts filtered to exclude < 2 samples per week showing expression.
+### unique miRs by week counts filtered to exclude < 2 samples per week showing expression.
 
 This code chunk is written to:   
   - filter any sequencing noise from the initial placenta counts table   
@@ -413,10 +429,6 @@ This code chunk is written to:
 nb: this analysis uses the countsPlacenta object which has been filtered for sequencing noise (raw counts < 5 -> 0). The counts have not been filtered for low expression, and have not been normalised. I consider this acceptable as the filter for minimum representation (2 samples in any week) has been applied, and the counts are only considered as a binary (on/off) varible such that the actual expression values are not relevant.
 
 ```{r warning=FALSE, error=FALSE}
-
-library(tidyverse)
-library(reshape2)
-library(pheatmap)
 
 # set ggplot2 theme
 theme_set(theme_bw())
