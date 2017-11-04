@@ -2,10 +2,7 @@
 title: "placentaProfile"
 author: "Melanie Smith"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output:
-html_document:
-fig_width: 6
-fig_height: 4
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -18,7 +15,7 @@ This step imports the raw counts data and samples metadata and reports some summ
 
 ### Import Count Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
 library(plyr)
@@ -30,6 +27,7 @@ library(magrittr)
 library(RColorBrewer)
 library(edgeR)
 library(limma)
+library(pheatmap)
 
 # import miRNA counts table from VM
 countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
@@ -50,7 +48,7 @@ countsPlacenta <- countsPlacenta[,order(colnames(countsPlacenta), decreasing = F
 
 ### Import Sample Meta Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
@@ -79,7 +77,7 @@ samples$group <- ifelse(samples$gestation <= 13, "Trimester_1",
 
 ### Reassign object classes
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # group as factor
 samples$group <- as.factor(samples$group) 
@@ -90,7 +88,7 @@ samples <- as.data.frame(samples)
 
 ### Import and add fetal sex data to Sample Meta Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
   dplyr::select(-matches("gestation")) %>%
   mutate(samplename = paste0("PAC", stringr::str_pad(samplename, width = 3, pad = "0")))
@@ -105,7 +103,7 @@ samples <- left_join(samples, fetalSex, by = "samplename")
 
 ### Summary Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # summary tables
 pandoc.table(samples,
@@ -125,11 +123,56 @@ lapply(samples[, c(2:8)], function(x) {
 
 ```
 
+# Placenta - Initial Data Exploration and QC
+
+```{r warning=FALSE, message=FALSE, cache=TRUE}
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# Read in the readStats file - this file gives the number of reads for each sample after each step of the Bcbio small-RNASeq pipeline highlighting any significant loss of reads.
+
+readStatsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/seqcluster/read_stats.tsv"), sep="\t", header=F)
+colnames(readStatsPlacenta) <- c("LibrarySize", "SampleName", "AlignmentStatus")
+readStatsPlacenta <- readStatsPlacenta[c(2, 1, 3)]
+readStatsPlacenta$LibrarySize <- as.numeric(readStatsPlacenta$LibrarySize)
+
+# Bar plot of readstats
+ggplot(readStatsPlacenta, aes(x=SampleName, y=LibrarySize, fill = AlignmentStatus)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))  +
+  labs(title = "Library Size - Placenta Tissue") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+From the barplot showing the change in library size throughout the Bcbio pipeline it is clear that there has been no significant loss of reads through the process of alignment and annotation in the placenta samples.   
+
+## Table of raw -> trimmed -> aligned -> annotated miRs in placenta
+
+```{r message = FALSE, error = FALSE, warning = FALSE, cache=TRUE}
+
+# make the readstats wide format to be used summary in table for thesis
+readStatsPlacentaWide <- spread(readStatsPlacenta, AlignmentStatus, LibrarySize)
+
+# remove the "_R1" and replace "Q" with "PAC" in all sample names (eg Q006_S1_R1 becomes PAC006)
+readStatsPlacentaWide$SampleName <- gsub("_R1","", readStatsPlacentaWide$SampleName)
+readStatsPlacentaWide$SampleName <- gsub("Q","PAC", readStatsPlacentaWide$SampleName)
+readStatsPlacentaWide$SampleName <- gsub("_S.*","", readStatsPlacentaWide$SampleName)
+# correct sample name mislabeled by QIAGEN
+readStatsPlacentaWide$SampleName <- gsub("PAC033", "PAC038", readStatsPlacentaWide$SampleName)
+
+
+
+
+
+```
+
 ### Plot to visualise the pre filtered, unique miRNA population between samples in Placenta
 
 From the raw counts we can see that there is not a lot of difference in the number of unique miRNAs identified between samples, however the actual population of miRNAs between samples does differ.
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -166,7 +209,7 @@ Here any individual observation with less than 5 counts is considered to be sequ
 * Logic check and record how many miRs will be filtered
 * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE, cache=TRUE}
 
 # exclude any individual count less than 5
 countsPlacenta[countsPlacenta < 5] <- 0
@@ -185,7 +228,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, cache=TRUE}
 
 # new df of miRNA names for DGEList object
 genes <- as.character(rownames(countsPlacenta)) %>%
@@ -206,7 +249,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
 
-```{r warning=FALSE}
+```{r warning=FALSE, message=TRUE, cache=TRUE}
 
 # Distribution of un-normalised counts 
 nsamples <- ncol(DGEList_placenta)
@@ -225,7 +268,7 @@ DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2).   
 
-```{r warning=FALSE, error=FALSE}
+```{r warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -255,7 +298,7 @@ for (i in 2:nsamples){
   lines(den$x, den$y, col=col[i], lwd=2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
-
+pdf("filteredPlacentaProfile.pdf")
 lcpm <- cpm(DGEList_placenta, log=TRUE)
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.15), las=2,
   main="", xlab="")
@@ -266,6 +309,7 @@ for (i in 2:nsamples){
 lines(den$x, den$y, col=col[i], lwd=2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
+dev.off()
 
 par(mfrow=c(1,1))
 
@@ -295,9 +339,32 @@ title(main="Placenta: Normalised data",ylab = "Log-cpm")
 
 ```
 
+### All placenta mean expression
+
+```{r message=FALSE, error=FALSE, warning=FALSE, cache=TRUE}
+
+# create expression DF for normalised placenta counts
+expressionPlacenta <- cpm(DGEList_placenta$counts) %>%
+  as.data.frame()
+
+# subset the top 20 highly expressed miRs by the sum of expression over all samples.
+expressionPlacentaMean <- expressionPlacenta[order(rowMeans(expressionPlacenta), decreasing = TRUE), ] %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("miRNAs") %>%
+  as.data.frame() %>%
+  dplyr::slice(., 1:nrow(.)) %>% 
+  mutate(meanCPM = rowMeans(.[grep("^PAC", names(.))])) %>%
+  select(., -matches("PAC"))
+
+
+
+#pandoc.table(expressionPlacentaMean)
+
+```
+
 ### table - top 20 miRNA in placenta by mean expression value (CPM)
 
-```{r}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # create expression DF for normalised placenta counts
 expressionPlacenta <- cpm(DGEList_placenta$counts) %>%
@@ -321,7 +388,7 @@ pandoc.table(expressionPlacentaTop20)
 
 ### table - top 100 miRNA in placenta by mean expression value (CPM)
 
-```{r}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # create expression DF for normalised placenta counts
 expressionPlacenta <- cpm(DGEList_placenta$counts) %>%
@@ -339,14 +406,14 @@ expressionPlacentaTop100$Tissue <- "Placenta"
 # expressionPlacentaTop20$TissueSpecificity <- "unknown"
 # expressionPlacentaTop20$PregnancySpecificity <- "unknown"
 
-saveRDS(expressionPlacentaTop100, "placenta_100.rds")
+#saveRDS(expressionPlacentaTop100, "placenta_100.rds")
 
 
 ```
 
 ## Heatmap of lcpm expression in placenta (all robust miRs)
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # df with sample name and weeks only
 weeks <- samples[, c("samplename", "gestation")]
@@ -354,7 +421,7 @@ weeks <- samples[, c("samplename", "gestation")]
 # df of lcpm expression by weeks' gestation
 expressionWithWeek <- as.data.frame(t(lcpm)) %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'samplename')) %>%
+  plyr::rename(c('rowname' = 'samplename')) %>%
   left_join(., weeks, by = 'samplename') %>%
   select(samplename, gestation, everything()) %>%
   select(., -samplename) %>%
@@ -400,7 +467,7 @@ annotation <- data.frame(samples[, c(1, 3)]) %>%
   as.data.frame() %>%
   tibble::column_to_rownames() 
 
-pdf("heat_placenta.pdf", height = 11, width = 6)
+#pdf("heat_placenta.pdf", height = 11, width = 6)
 pheatmap(lcpm, 
          annotation = annotation,
          cluster_cols = T,
@@ -411,7 +478,7 @@ pheatmap(lcpm,
          show_colnames = F,
          cutree_col = 4,
          treeheight_row = 0)
-dev.off()
+#dev.off()
 
 
 ```
@@ -428,7 +495,7 @@ This code chunk is written to:
   - produce heat maps of binary expression vs no expression  
 nb: this analysis uses the countsPlacenta object which has been filtered for sequencing noise (raw counts < 5 -> 0). The counts have not been filtered for low expression, and have not been normalised. I consider this acceptable as the filter for minimum representation (2 samples in any week) has been applied, and the counts are only considered as a binary (on/off) varible such that the actual expression values are not relevant.
 
-```{r warning=FALSE, error=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -608,7 +675,7 @@ countsByWeek[is.na(countsByWeek)] <- 0 # convert any NAs to zeros
 
 ## Single week expression after filtering for >= 2 expression in given week
 
-```{r warning=FALSE, error=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # miRs with expression in one week only
 w6 <- subset(countsByWeek, countsByWeek$week06 == 1 & (rowSums(countsByWeek[, 3:10]) == 0))
@@ -621,11 +688,11 @@ w13 <- subset(countsByWeek, countsByWeek$week13 == 1 & (rowSums(countsByWeek[, c
 w14 <- subset(countsByWeek, countsByWeek$week14 == 1 & (rowSums(countsByWeek[, c(2:8, 10)]) == 0))
 w16 <- subset(countsByWeek, countsByWeek$week16 == 1 & (rowSums(countsByWeek[, 2:9]) == 0))
 
-singleWeekExpression <- bind_rows(w6, w7, w8, w9, w10, w11, w13, w14, w16) %>%
+singleWeekExpressionPlacenta <- bind_rows(w6, w7, w8, w9, w10, w11, w13, w14, w16) %>%
   tibble::column_to_rownames()
 
 # only works before the cluster steps
-pheatmap(as.matrix(singleWeekExpression), 
+pheatmap(as.matrix(singleWeekExpressionPlacenta), 
          cluster_cols = FALSE,
          cluster_rows = FALSE,
          cellwidth = 15, 
@@ -638,15 +705,15 @@ pheatmap(as.matrix(singleWeekExpression),
          main="Binary Expression in Placenta")
 
 # cluster to obtain order for heatmap (default distance method = euclidean)
-clust <- hclust(dist(singleWeekExpression))
+clust <- hclust(dist(singleWeekExpressionPlacenta))
 
 # order oxygenMediatedExpression by cluster order
-singleWeekExpression <- singleWeekExpression[match(clust$labels, rownames(singleWeekExpression)), ] %>%
+singleWeekExpressionPlacenta <- singleWeekExpressionPlacenta[match(clust$labels, rownames(singleWeekExpressionPlacenta)), ] %>%
   tibble::rownames_to_column()
 
 # Heatmap of miRNA in placenta with expression >=2 weeks before or after the 10 week line and nothing on the other side.
-singleCounts_melt <- melt(singleWeekExpression, id = "rowname") %>%
-  rename(c('rowname' = 'miRNA'))
+singleCounts_melt <- melt(singleWeekExpressionPlacenta, id = "rowname") %>%
+  plyr::rename(c('rowname' = 'miRNA'))
   
 ggplot(singleCounts_melt, aes(variable, miRNA)) +
   geom_tile(aes(fill = as.factor(value)), colour = "white") +
@@ -668,17 +735,17 @@ ggplot(singleCounts_melt, aes(variable, miRNA)) +
 There is a change in placental function around the 10 weeks' gestation mark when the placenta infiltrates the maternal blood space and begins to extract oxygen and nutrients from the mother as well as discard waste.   
 Here I'm looking for miRs which are specific to either to pre or post infiltration stage. To identify these miRs I've used a filter whereby miRs with expression in at least 2 weeks prior to the week 10 cut off (ie columns 2:5) but nothing after are subset. Then miRs with expression in at least 2 samples post the week 10 cut off (ie columns 7:10) but nothing before the cut off are subset. The two subsetted df are then concatonated to produce a df of only miRs which fit the two filter criteria.
 
-```{r warning=FALSE, error=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 left <- subset(countsByWeek, (rowSums(countsByWeek[, 2:5]) > 1 & (rowSums(countsByWeek[, 7:10]) < 1)))
 
 right <- subset(countsByWeek, (rowSums(countsByWeek[, 2:5]) < 1 & (rowSums(countsByWeek[, 7:10]) > 1)))
 
-oxygenMediatedExpression <- bind_rows(left, right) %>%
+oxygenMediatedExpressionPlacenta <- bind_rows(left, right) %>%
   tibble::column_to_rownames()
 
 # only works before the cluster steps
-pheatmap(as.matrix(oxygenMediatedExpression), 
+pheatmap(as.matrix(oxygenMediatedExpressionPlacenta), 
          cluster_cols = FALSE,
          cluster_rows = TRUE,
          cellwidth = 15, 
@@ -691,16 +758,17 @@ pheatmap(as.matrix(oxygenMediatedExpression),
          main = "Binary Expression in Placenta")
 
 # cluster to obtain order for heatmap (default distance method = euclidean)
-clust <- hclust(dist(oxygenMediatedExpression))
+clust <- hclust(dist(oxygenMediatedExpressionPlacenta))
 
 # order oxygenMediatedExpression by cluster order
-oxygenMediatedExpression <- oxygenMediatedExpression[match(clust$labels, rownames(oxygenMediatedExpression)), ] %>%
+oxygenMediatedExpressionPlacenta <- oxygenMediatedExpressionPlacenta[match(clust$labels, rownames(oxygenMediatedExpressionPlacenta)), ] %>%
   tibble::rownames_to_column()
 
 # Heatmap of miRNA in placenta with expression >=2 weeks before or after the 10 week line and nothing on the other side.
-hypoxicCounts_melt <- melt(oxygenMediatedExpression, id = "rowname") %>%
-  rename(c('rowname' = 'miRNA'))
-  
+hypoxicCounts_melt <- melt(oxygenMediatedExpressionPlacenta, id = "rowname") %>%
+  plyr::rename(c('rowname' = 'miRNA'))
+
+#pdf("heatHypoxicPlacenta.pdf", height = 11, width = 6) 
 ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
   geom_tile(aes(fill = as.factor(value)), colour = "white") +
   scale_fill_manual(values = c("darksalmon", "forestgreen")) +
@@ -712,9 +780,9 @@ ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
   theme(legend.position = "none") +
   theme(axis.title.y=element_blank(),
       axis.text.y = element_text(hypoxicCounts_melt$rowname)) +
-  geom_vline(xintercept=3.55, colour = "white") + 
   geom_vline(xintercept=5.45, colour = "white") + 
   coord_fixed(ratio = 1)
+#dev.off()
 
 ```
 
@@ -724,7 +792,7 @@ ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
     + filtered for sequencing noise (all counts < 5 reduced to 0)
     + filtered for miRs with 0 counts in all samples (after the < 5 to 0 filter)
 
-```{r warning=FALSE, error=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # select on the samplename and gestation (week) columns from the samples df
 sampleSex <- samples[, c(1, 9)] 
@@ -762,11 +830,11 @@ countsBySex <- cbind(leading, countsBySex)
 
 # subset expression by fetal sex
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 # subset the female samples from counts - may end up with some zero counts
 allFemale <- dplyr::filter(countsBySex, Sex == "Female") %>%
-  rename(c('samplename' = 'rowname')) %>% 
+  plyr::rename(c('samplename' = 'rowname')) %>% 
   tibble::column_to_rownames() %>%
   select(-matches("Sex")) %>%
   t() %>%
@@ -790,7 +858,7 @@ ExpressionFemale <- allFemale[ !rowSums(allFemale) == 0, ] %>%
 
 # subset the male samples from counts - may end up with some zero counts
 allMale <- dplyr::filter(countsBySex, Sex == "Male") %>%
-  rename(c('samplename' = 'rowname')) %>% 
+  plyr::rename(c('samplename' = 'rowname')) %>% 
   tibble::column_to_rownames() %>%
   select(-matches("Sex")) %>%
   t() %>%
@@ -815,20 +883,20 @@ ExpressionMale <- allMale[ !rowSums(allMale) == 0, ] %>%
 
 # sex specific expression - female
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 zeroMale <- as.data.frame(rownames(zeroExpressionMale)) %>%
   set_colnames("miRNA")
 
 allfemale <- allFemale %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'miRNA'))
+  plyr::rename(c('rowname' = 'miRNA'))
 
 bioFemale <- as.data.frame(rownames(biologicallyRelevantFemale)) %>%
   set_colnames("miRNA")
 
 femaleOnly <- semi_join(allfemale, zeroMale, by = "miRNA") %>%
-  rename(c('miRNA' = 'rowname')) %>%
+  plyr::rename(c('miRNA' = 'rowname')) %>%
   tibble::column_to_rownames()
 
 femaleOnly$numberSamples <- as.data.frame(rowSums(femaleOnly))
@@ -846,20 +914,20 @@ proportionFemale <- (femaleOnly$numberSamples)/(ncol(femaleOnly)-1)
 
 # sex specific expression - male
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 zeroFem <- as.data.frame(rownames(zeroExpressionFemale)) %>%
   set_colnames("miRNA")
 
 allmale <- allMale %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'miRNA'))
+  plyr::rename(c('rowname' = 'miRNA'))
 
 bioMale <- as.data.frame(rownames(biologicallyRelevantMale)) %>%
   set_colnames("miRNA")
 
 maleOnly <- semi_join(allmale, zeroFem, by = "miRNA") %>%
-  rename(c('miRNA' = 'rowname')) %>%
+  plyr::rename(c('miRNA' = 'rowname')) %>%
   tibble::column_to_rownames()
 
 # How anyof the male samples express the 'male specific' miRNA
@@ -876,6 +944,13 @@ cbind(maleOnly$numberSamples, proportionMale) %>%
 
 ```
 
+## Clustered miRNA as a subset of total expression
+
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
+
+cluster <- subset(DGEList_placenta$counts, rownames(DGEList_placenta$counts) %in% c("hsa-miR-498", "hsa-miR-512-3p", "hsa-miR-512-5p", "hsa-miR-515-3p", "hsa-miR-515-5p", "hsa-miR-516a-3p", "hsa-miR-516a-5p", "hsa-miR-516b-3p", "hsa-miR-516b-5p", "hsa-miR-517a-3p", "hsa-miR-517a-5p", "hsa-miR-517b-3p", "hsa-miR-517b-5p", "hsa-miR-517c-3p", "hsa-miR-517c-5p", "hsa-miR-519a-3p", "hsa-miR-519a-5p", "hsa-miR-519b-3p", "hsa-miR-5219b-5p", "hsa-miR-519c", "hsa-miR-519c-3p", "hsa-miR-519c-5p", "hsa-miR-519d-3p", "hsa-miR-519d-5p", "hsa-miR-519e-3p", "hsa-miR-519e-5p", "hsa-miR-520a-3p", "hsa-miR-520a-5p", "hsa-miR-520b", "hsa-miR-520c-5p", "hsa-miR-520c-3p", "hsa-miR-520d-3p", "hsa-miR-520d-5p", "hsa-miR-520e", "hsa-miR-520f-3p", "hsa-miR-520f-5p", "hsa-miR-520g-3p", "hsa-miR-520g-5p", "hsa-miR-520h", "hsa-miR-518a-3p", "hsa-miR-518a-5p", "hsa-miR-518b", "hsa-miR-518c-3p", "hsa-miR-518c-5p", "hsa-miR-518d-3p", "hsa-miR-518d-5p", "hsa-miR-518e-3p", "hsa-miR-518e-5p", "hsa-miR-518f-3p", "hsa-miR-518f-5p", "hsa-miR-521", "hsa-miR-522-3p", "hsa-miR-522-5p", "hsa-miR-523-3p", "hsa-miR-523-5p", "hsa-miR-524-3p", "hsa-miR-524-5p", "hsa-miR-525-3p", "hsa-miR-525-5p", "hsa-miR-526a", "hsa-miR-526b-3p", "hsa-miR-526b-5p", "hsa-miR-527", "hsa-miR-1283", "hsa-miR-1323","hsa-miR-372-3p", "hsa-miR-372-5p", "hsa-miR-373-3p", "hsa-miR-373-5p", "hsa-miR-371a-3p", "hsa-miR-371a-5p","hsa-miR-136-3p", "hsa-miR-136-5p", "hsa-miR-154-3p", "hsa-miR-154-5p", "hsa-miR-299-3p", "hsa-miR-299-5p", "hsa-miR-323a-3p", "hsa-miR-323a-5p", "hsa-miR-323b-3p", "hsa-miR-329-3p", "hsa-miR-329-5p", "hsa-miR-342-3p", "hsa-miR-342-5p", "hsa-miR-369-3p", "hsa-miR-369-5p", "hsa-miR-370-3p", "hsa-miR-370-5p", "hsa-miR-376a-3p", "hsa-miR-376a-5p", "hsa-miR-376b-3p", "hsa-miR-376b-5p", "hsa-miR-376c-3p", "hsa-miR-376c-5p", "hsa-miR-377-3p", "hsa-miR-377-5p", "hsa-miR-409-3p", "hsa-miR-409-5p", "hsa-miR-410-3p", "hsa-miR-410-5p", "hsa-miR-411-3p", "hsa-miR-411-5p", "hsa-miR-433-3p", "hsa-miR-433-5p", "hsa-miR-485-3p", "hsa-miR-485-5p", "hsa-miR-487a-3p", "hsa-miR-487a-5p", "hsa-miR-487b-3p", "hsa-miR-487b-5p", "hsa-miR-494-3p", "hsa-miR-494-5p","hsa-miR-495-3p", "hsa-miR-495-5p", "hsa-miR-654-3p", "hsa-miR-654-5p", "hsa-miR-1247-3p", "hsa-miR-1247-5p"))
+
+```
 
 ```{r echo=FALSE}
 
