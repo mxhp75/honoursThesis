@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This step imports the raw counts data and samples metadata and reports some summary information.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
 library(plyr)
@@ -98,7 +98,7 @@ Here any individual observation with less than five counts is considered to be s
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less than 5
 countsPlacenta[countsPlacenta < 5] <- 0
@@ -117,7 +117,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # new df of miRNA names for DGEList object
 genes <- as.character(rownames(countsPlacenta)) %>%
@@ -138,7 +138,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
 
-```{r warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Distribution of un-normalised counts 
 nsamples <- ncol(DGEList_placenta)
@@ -162,7 +162,7 @@ DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of greater than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2).   
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -240,7 +240,7 @@ title(main = "Placenta: Normalised data",ylab = "Log-cpm")
 The multidimensional scaling plots create a temp. log fold change between pairs.   
 Here we see that the Leading logFC on dimension 1 fails to seperate the samples by trimester, but does roughly separate the samples in gestational order along the 2^nd dimension
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 par(mfrow=c(1,1))
 
@@ -259,7 +259,7 @@ title(main = "Placenta: Multi Dimensional Scaling Plot")
   * Differential Expression between hypoxic and oxygenated placenta
     + Here the design matrix treats gestation as a discrete variable with levels "Hypoxic" and "Oxygenated".
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 par(mfrow=c(1,1))
 
@@ -281,13 +281,13 @@ summary(decideTests(fit))
 topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
 plotMD(fit, main = "Placenta: Mean Difference Plot\nOxygenation")
 
-summary(lmFit)
+#summary(fit)
 
 ```
 
 ## Volcano plot for visualisation of differential expression by oxygen state
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 decide <- decideTests(fit)
 
@@ -306,7 +306,7 @@ d4$neg.log10FDR <- -log10(d4$adj.P.Val)
 
 colour <- c("red", "black", "darkgreen")
 
-pdf("deHypoxic_placenta.pdf", width = 6, height = 6)
+#pdf("deHypoxic_placenta.pdf", width = 6, height = 6)
 ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
   geom_point(alpha = 0.8, size = 2.00) +
   xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
@@ -316,7 +316,7 @@ ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
                          labels = c("Down-regulated", "Deregulated", "Up-regulated")) +
   theme(plot.title = element_text(hjust = 0.5)) +
   geom_hline(yintercept = 1.371611, linetype = "dashed")
-dev.off()
+#dev.off()
 
 rm(list = c("d2","d3","d4"))
 
