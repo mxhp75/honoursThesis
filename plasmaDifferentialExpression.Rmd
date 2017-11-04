@@ -13,12 +13,19 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This step imports the raw counts data and samples metadata and reports some summary information.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
+library(plyr)
+library(dplyr)
 library(tidyverse)
+library(reshape2)
 library(pander)
 library(magrittr)
+library(RColorBrewer)
+library(edgeR)
+library(limma)
+library(pheatmap)
 
 # import miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
@@ -91,13 +98,7 @@ lapply(samples[, c(2:8)], function(x) {
 
 From the raw counts we can see that there is a large difference in the number of unique miRNAs identified between samples. Of the 1571 unique miRNAs identified, samples vary between 355 and 973 miRNA. The population of miRNAs varies between samples.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
-
-library(tidyverse)
-library(magrittr)
-library(plyr)
-library(dplyr)
-
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -121,6 +122,15 @@ ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA, fill = samples$group
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
+# initial library size in plasma - no fill
+#pdf("rawmiRNAPlasma.pdf")
+ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of Unique miRNAs Identified", title = "Count of pre-filtered miRNAs in Plasma") + 
+  theme_bw()
+#dev.off()
+
 ```
 
 # Filter sequencing noise   
@@ -130,7 +140,7 @@ Here any individual observation with less than five counts is considered to be s
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less or equal to than 10
 countsPlasma[countsPlasma <= 5] <- 0
@@ -150,11 +160,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
-
-# load required Libraries
-library(edgeR)
-library(tidyverse)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # assign object to DGEList
 DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
@@ -168,12 +174,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the plasma libraries are not within a similar range. The mean of counts is small and centered around -5 CPM (log2) for the majority of samples.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
-
-# load required Libraries
-library(edgeR)
-library(tidyverse)
-library(RColorBrewer)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Calculate and visualise normalisation factors
 nsamples <- ncol(DGEList_plasma)
@@ -197,12 +198,7 @@ DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of greater than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2). 
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
-
-# load required Libraries
-library(plyr)
-library(edgeR)
-library(tidyverse)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -227,6 +223,7 @@ DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE]
 nsamples <- ncol(DGEList_plasma)
 col <- brewer.pal(nsamples, "Paired")
 par(mfrow=c(1,2))
+#pdf("preFilterPlasma.pdf")
 plot(density(rawlcpm_plasma[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
   main = "", xlab = "")
 title(main = "A. Unfiltered data", xlab = "Log-cpm") 
@@ -236,10 +233,11 @@ for (i in 1:nsamples){
   lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
-
+#dev.off()
 
 # Density plot of filtered lcpm counts
 lcpm <- cpm(DGEList_plasma, log = TRUE)
+#pdf("FilteredPlasma.pdf")
 plot(density(lcpm[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
   main = "", xlab = "")
 title(main = "B. Filtered data", xlab = "Log-cpm") 
@@ -249,6 +247,7 @@ for (i in 1:nsamples){
 lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend=samples$samplename, text.col = col, bty = "n")
+#dev.off()
 
 par(mfrow=c(1, 1))
 
@@ -267,6 +266,7 @@ filteredNonZero <- t(filteredNonZero) %>%
   as.data.frame()
 filteredNonZero <- tibble::rownames_to_column(filteredNonZero)
 
+# final library size - trimester fill
 #png("robustmiRNAPlasma.png")
 ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
   geom_bar(stat = "identity") +
@@ -277,6 +277,15 @@ ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
+# final library size - no fill
+#pdf("robustmiRNAPlasma.pdf")
+ggplot(data = filteredNonZero, aes(x = rowname, y = V1)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in Plasma") + 
+  theme_bw()
+#dev.off()
+
 ```
 
 # MDS Plots
@@ -284,7 +293,7 @@ ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
 The multidimensional scaling plots create a temp. log fold change between pairs.   
 Here we see that the Leading logFC on dimension 1 and 2 fails to seperate the samples by trimester.
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 lcpm <- cpm(DGEList_plasma, log = TRUE, prior.count = 1)
 
@@ -292,8 +301,16 @@ col.group <- samples$group
 levels(col.group) <- brewer.pal(nlevels(col.group), "Set1") 
 col.group <- as.character(col.group)
 
-plotMDS(lcpm, labels = samples$samplename, col = col.group, dim = c(1, 2))
+#pdf("mds_plasma.pdf", height = 6, width = 11)
+plotMDS(cpm(DGEList_plasma, log = TRUE), col = col.group, pch = 20, cex = 1.5)
+legend("bottomleft", legend = levels(samples$group), pch = 20, col = c("red", "blue"), ncol = 1, cex = 1.1)
 title(main = "Maternal Plasma: Multi Dimensional Scaling Plot")
+#dev.off()
+
+#pdf("mds_plasma3.pdf", height = 6, width = 11)
+plotMDS(cpm(DGEList_plasma, log = TRUE), labels = samples$gestation, cex = 1.5)
+title(main = "Plasma: Multi Dimensional Scaling Plot")
+#dev.off()
 
 ```
 
@@ -301,12 +318,7 @@ title(main = "Maternal Plasma: Multi Dimensional Scaling Plot")
   * Differential Expression between Trimester 1 and Trimester 2
     + Here the design matrix treats gestation as a discrete variable with levels "Trimester 1" and "Trimester 2".
 
-```{r}
-
-# load required libraries
-library(tidyverse)
-library(edgeR)
-library(limma)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -330,7 +342,7 @@ plotMD(fit, main = "Maternal Plasma: Mean Difference Plot\nTrimester")
 
 ## Volcano plot for visualisation of differential expression by Trimester
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 decide <- decideTests(fit)
 
@@ -367,12 +379,7 @@ ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
   * Differential Expression between fetal sex
     + Here the design matrix treats fetal sex as discrete variables with levels "Female" and "Male".
 
-```{r}
-
-# load required libraries
-library(tidyverse)
-library(edgeR)
-library(limma)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -389,14 +396,14 @@ fit <- lmFit(v, design)
 fit <- contrasts.fit(fit, cont.mat)
 fit <- eBayes(fit) # moderated t-test
 summary(decideTests(fit))
-topTable <- topTable(fit, coef = 1, n = 10, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
+topTable <- topTable(fit, coef = 1, n = 10, sort = "p" , adjust.method = "fdr") # requires eBayes.
 plotMD(fit)
 
 ```
 
 ## Volcano plot for visualisation of differential expression by Trimester
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 decide <- decideTests(fit)
 
@@ -409,7 +416,7 @@ d3 <- decideTests(fit) %>%
   as.data.frame
 d3 <- d3[1]
 
-d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by="rowname")
+d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3)), by = "rowname")
 d4$V1 <- as.factor(d4$V1)
 d4$neg.log10FDR <- -log10(d4$adj.P.Val)
 
