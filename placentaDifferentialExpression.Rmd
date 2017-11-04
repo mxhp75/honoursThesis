@@ -3,6 +3,7 @@ title: "placentaDifferentialExpression"
 author: "Melanie Smith"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
+
 ---
 
 ```{r setup, include=FALSE}
@@ -13,11 +14,19 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This step imports the raw counts data and samples metadata and reports some summary information.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
+library(plyr)
+library(reshape2)
+library(dplyr)
 library(tidyverse)
 library(pander)
 library(magrittr)
+library(edgeR)
+library(RColorBrewer)
+library(limma)
+library(ggplot2)
+library(pheatmap)
 
 # import miRNA counts table from VM
 countsPlacenta <- read.table(("~/placentaBcbio/placenta/final/2017-05-23_placenta/counts_mirna.tsv"), 
@@ -60,6 +69,14 @@ samples$group <- ifelse(samples$gestation <= 13, "Trimester_1",
 # group as factor
 samples$group <- as.factor(samples$group) 
 
+# add new oxygenation factor to each row based on gestation
+# hypoxic = 6-9 wks, oxic = 10-26 wks
+samples$oxygenation <- ifelse(samples$gestation <= 9, "hypoxic", 
+                        ifelse(samples$gestation >= 10, "oxygenated", NA))
+
+# group as factor
+samples$oxygenation <- as.factor(samples$oxygenation) 
+
 samples <- as.data.frame(samples)
 
 # Add fetal sex to samples df
@@ -90,9 +107,32 @@ lapply(samples[, c(2:8)], function(x) {
 
 ```
 
+## miRBase track for chromosome identification
+**uncomment to run - won't knit unless commented out**
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+# Download miRNA track from mirbase
+
+# mirbaseGRCh37 <- "ftp://mirbase.org/pub/mirbase/20/genomes/hsa.gff3"
+# 
+# mirbase_db <- import.gff3(mirbaseGRCh37)
+# 
+# mirbase_df <- mirbase_db %>%
+#     as.data.frame() %>%
+#     select(seqnames, start, end, Name)
+
+# save mirbase_df
+#  saveRDS(mirbase_df, "mirbase_df.rds")
+# 
+# miRNA <- mirbase_db[,4] %>%
+#    as.data.frame()
+
+```
+
 ### Create LaTeX code for the samples table in methods section
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 library(xtable)
 options(xtable.floating = FALSE)
@@ -107,11 +147,7 @@ xtable(samples[, -8,])
 
 From the raw counts we can see that there is not a lot of difference in the number of unique miRNAs identified between samples, however the actual population of miRNAs between samples does differ.
 
-```{r warning=FALSE}
-
-library(tidyverse)
-library(magrittr)
-library(dplyr)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -137,6 +173,16 @@ ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA, fill = samples$group
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
+
+# produce plot of # unique miRNA per sample - no fill
+#pdf("rawmiRNAPlacenta.pdf")
+ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of Unique miRNAs Identified", title = "Count of pre-filtered miRNAs in Placenta") + 
+  theme_bw()
+#dev.off()
+
 ```
 
 We start with a total of 1835 unique miRNAs - of which no single sample has more than 1102 individual miRNAs. 
@@ -148,7 +194,7 @@ Here any individual observation with less than five counts is considered to be s
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less than 5
 countsPlacenta[countsPlacenta < 5] <- 0
@@ -167,11 +213,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r message=FALSE, warning=FALSE}
-
-# load required Libraries
-library(edgeR)
-library(tidyverse)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # new df of miRNA names for DGEList object
 genes <- as.character(rownames(countsPlacenta)) %>%
@@ -192,9 +234,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the placenta libraries are within a similar range, however the mean of counts is small and centered around 0-1 CPM (log2)   
 
-```{r warning=FALSE}
-
-library(RColorBrewer)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Distribution of un-normalised counts 
 nsamples <- ncol(DGEList_placenta)
@@ -218,11 +258,7 @@ DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of greater than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2).   
 
-```{r warning=FALSE, error=FALSE}
-
-library(plyr)
-library(tidyverse)
-library(edgeR)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -243,6 +279,7 @@ DGEList_placenta <- DGEList_placenta[keep.exprs,, keep.lib.sizes = FALSE]
 nsamples <- ncol(DGEList_placenta)
 col <- brewer.pal(nsamples, "Paired")
 par(mfrow=c(1,2))
+#pdf("preFilterPlacenta.pdf")
 plot(density(rawlcpm_placenta[,1]), col = col[1], lwd = 2, ylim = c(0, 0.15), las = 2,
   main = "", xlab = "")
 title(main = "A. Unfiltered data", xlab = "Log-cpm") 
@@ -252,8 +289,9 @@ for (i in 1:nsamples){
   lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend = samples$samplename, text.col = col, bty = "n")
-
+#dev.off()
 lcpm <- cpm(DGEList_placenta, log=TRUE)
+#pdf("filteredPlacenta.pdf")
 plot(density(lcpm[,1]), col = col[1], lwd = 2, ylim = c(0, 0.15), las = 2,
   main = "", xlab = "")
 title(main = "B. Filtered data", xlab = "Log-cpm") 
@@ -263,7 +301,7 @@ for (i in 1:nsamples){
 lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
-
+#dev.off ()
 par(mfrow=c(1,1))
 
 # Plot filtered library sizes against total miRNA
@@ -285,6 +323,14 @@ ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
   scale_fill_discrete(name = "Trimester")
 #dev.off()
 
+#pdf("robustmiRNAPlacenta.pdf")
+ggplot(data = filteredNonZero, aes(x = rowname, y = V1)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count Robust miRNAs in Placenta After Filtering") + 
+  theme_bw()
+#dev.off()
+
 # Distribution of normalised and filtered counts data
 lcpm <- cpm(DGEList_placenta, log = TRUE)
 boxplot(lcpm, las = 2, col = col, main = "")
@@ -297,7 +343,7 @@ title(main = "Placenta: Normalised data",ylab = "Log-cpm")
 The multidimensional scaling plots create a temp. log fold change between pairs.   
 Here we see that the Leading logFC on dimension 1 fails to seperate the samples by trimester, but does roughly separate the samples in gestational order along the 2^nd dimension
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 par(mfrow=c(1,1))
 
@@ -307,8 +353,16 @@ col.group <- samples$group
 levels(col.group) <- brewer.pal(nlevels(col.group), "Set1")
 col.group <- as.character(col.group)
 
-plotMDS(cpm(DGEList_placenta, log = TRUE), labels = samples$samplename, col = col.group)
+#pdf("mds_placenta.pdf", height = 6, width = 11)
+plotMDS(cpm(DGEList_placenta, log = TRUE), col = col.group, pch = 20, cex = 1.8)
+legend("bottomleft", legend = levels(samples$group), pch = 20, col = c("red", "blue"), ncol = 1, cex = 1.1)
 title(main = "Placenta: Multi Dimensional Scaling Plot")
+#dev.off()
+
+#pdf("mds_placenta.pdf", height = 6, width = 11)
+plotMDS(cpm(DGEList_placenta, log = TRUE), labels = samples$gestation, cex = 1.5)
+title(main = "Placenta: Multi Dimensional Scaling Plot")
+#dev.off()
 
 ```
 
@@ -316,12 +370,7 @@ title(main = "Placenta: Multi Dimensional Scaling Plot")
   * Differential Expression between Trimester 1 and Trimester 2
     + Here the design matrix treats gestation as a discrete variable with levels "Trimester 1" and "Trimester 2".
 
-```{r}
-
-# load required libraries
-library(tidyverse)
-library(edgeR)
-library(limma)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 par(mfrow=c(1,1))
 
@@ -382,16 +431,11 @@ rm(list = c("d2","d3","d4"))
 
 ```
 
-# Differential Expression Analysis   - Fetal Sex
+# Differential Expression Analysis   - Fetal Sex - All Chromosomes
   * Differential Expression between fetal sex
     + Here the design matrix treats fetal sex as discrete variables with levels "Female" and "Male".
 
-```{r}
-
-# load required libraries
-library(tidyverse)
-library(edgeR)
-library(limma)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -413,9 +457,9 @@ plotMD(sexFit, main = "Placenta: Mean Difference Plot\nFetal Sex")
 
 ```
 
-## Volcano plot for differential expression by fetal sex
+## Volcano plot for differential expression by fetal sex - All Chromosomes
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 d2 <- topTable(sexFit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
 d2$threshold <- 0
@@ -430,7 +474,7 @@ d4 <- left_join((tibble::rownames_to_column(d2)), (tibble::rownames_to_column(d3
 d4$V1 <- as.factor(d4$V1)
 d4$neg.log10FDR <- -log10(d4$adj.P.Val)
 
-#png("deFetalSex.png")
+#pdf("deFetalSex.pdf")
 ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
   geom_point(alpha = 0.9, size = 2.00) +
   xlab("log2 Fold Change") + ylab("-ve log10 FDR") +
@@ -448,13 +492,7 @@ rm(list = c("d2","d3","d4"))
 
 ## Heatmaps for Differential Expression Visualisation
 
-```{r}
-
-library(reshape)
-library(ggplot2)
-library(pheatmap)
-library(dplyr)
-library(magrittr)
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 lcpm <- cpm(DGEList_placenta, log = TRUE)
 
@@ -464,7 +502,7 @@ weeks <- samples[, c("samplename", "gestation")]
 # df of lcpm expression by weeks' gestation
 expressionWithWeek <- as.data.frame(t(lcpm)) %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'samplename')) %>%
+  plyr::rename(c('rowname' = 'samplename')) %>%
   left_join(., weeks, by = 'samplename') %>%
   select(samplename, gestation, everything()) %>%
   select(., -samplename) %>%
@@ -474,7 +512,8 @@ expressionWithWeek <- as.data.frame(t(lcpm)) %>%
   as.data.frame() 
 expressionWithWeek <- expressionWithWeek[-1, ]
 
-# create heatmap of all robust miRNA using lcpm expression
+# create heatmap of all robust miRNA using lcpm expression cluster_cols = FALSE
+#pdf("heatNoCluster.pdf", width = 6, height = 11)
 pheatmap(expressionWithWeek,
          cluster_cols = FALSE, 
          cluster_rows = TRUE,
@@ -483,6 +522,19 @@ pheatmap(expressionWithWeek,
          main = "log2 CPM Expression of Robust miRNA\nin Human Placenta",
          show_rownames = FALSE,
          treeheight_row = 0)
+#dev.off()
+
+# create heatmap of all robust miRNA using lcpm expression cluster_cols = TRUE
+#pdf("heatWithCluster.pdf", width = 6, height = 11)
+pheatmap(expressionWithWeek,
+         cluster_cols = TRUE, 
+         cluster_rows = TRUE,
+         legend = TRUE,
+         scale = "row",
+         main = "log2 CPM Expression of Robust miRNA\nin Human Placenta",
+         show_rownames = FALSE,
+         treeheight_row = 0)
+#dev.off()
 
 
 # DE miRNA in placenta (ordered by p-value) - DE by Trimester
@@ -518,6 +570,19 @@ pheatmap(dePlacenta20,
          treeheight_row = 0)
 
 ```
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+Sex <- samples$Sex
+
+design = model.matrix( ~ group, data = samples)
+y <- removeBatchEffect(v, batch=Sex, design=design)
+
+
+y %>% head()
+
+```
+
 
 ```{r echo=FALSE}
 
