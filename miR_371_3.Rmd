@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Import Count Data 
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
 library(plyr)
@@ -55,7 +55,7 @@ mirbase_db <- readRDS("~/Bcbioplasma/mirbase_db.rds")
 
 ### Import Sample Meta Data 
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
@@ -92,7 +92,7 @@ samples <- as.data.frame(samples)
 
 ### Reasign object classes
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # group as factor
 samples$group <- as.factor(samples$group)
@@ -105,7 +105,7 @@ samples$oxygenation <- as.factor(samples$oxygenation)
 
 ### Import and add fetal sex data to Sample Meta Data 
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Add fetal sex to samples df
 fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
@@ -128,7 +128,7 @@ Here any individual observation with less than five counts is considered to be s
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less than 5
 countsPlacenta[countsPlacenta < 5] <- 0
@@ -145,7 +145,7 @@ countsPlacenta <- countsPlacenta[ rowSums(countsPlacenta) != 0, ]
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required Libraries
 library(edgeR)
@@ -168,7 +168,7 @@ Before differential expression analysis the sample libraries need to be normalis
 Normalising the libraries allows for the direct comparison between samples.   
 Here the Trimmed Mean of M Values method is used.   
 
-```{r warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # calculate normalisation factors and apply to the DGEList object
 DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
@@ -179,7 +179,7 @@ DGEList_placenta <- calcNormFactors(DGEList_placenta, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. 
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # new df of unfiltered cpm for the reduced DGEList
 rawCpm_placenta <- cpm(DGEList_placenta)
@@ -206,7 +206,7 @@ Here any individual observation with less than 5 counts is considered to be sequ
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less or equal to than 5
 countsPlasma[countsPlasma <= 5] <- 0
@@ -223,7 +223,7 @@ countsPlasma <- countsPlasma[ rowSums(countsPlasma) != 0, ]
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # assign object to DGEList
 DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
@@ -236,7 +236,7 @@ Before differential expression analysis the sample libraries need to be normalis
 Normalising the libraries allows for the direct comparison between samples.   
 Here the Trimmed Mean of M Values method is used.   
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # calculate normalisation factors and apply to the DGEList object
 DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
@@ -247,7 +247,7 @@ DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. 
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # new df of raw cpm for the reduced DGEList
 rawCpm_plasma <- cpm(DGEList_plasma)
@@ -268,7 +268,7 @@ DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE]
 
 ## heatmaps of miR-371-3 placental miRNA in placenta
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -284,7 +284,7 @@ all371_3_placenta <- subset(cpmDGEList_placenta, rownames(cpmDGEList_placenta) %
   t() %>%
   as.data.frame() %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'samplename')) %>%
+  plyr::rename(c('rowname' = 'samplename')) %>%
   left_join(., weeks, by = 'samplename') %>%
   select(., -samplename) %>%
   arrange(., gestation) %>%
@@ -313,7 +313,7 @@ pheatmap(as.matrix(all371_3_placenta),
 
 # Heat map miR-371-3 miRNA with weeks as annotation - Placenta
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 lcpm_placenta <- cpm(DGEList_placenta, log = TRUE)
 
@@ -348,7 +348,7 @@ pheatmap(as.matrix(lcpm_placenta),
 
 ## heatmaps of miR-371-3 cluster placental miRNA in plasma
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -358,13 +358,13 @@ cpmDGEList_plasma <- cpm(DGEList_plasma) %>%
 
 weeks <- samples[, c("samplename", "gestation")]
 
-# all observed C14MC cluster miRNA in placenta
+# all observed C14MC cluster miRNA in plasma
 all371_3_plasma <- subset(cpmDGEList_plasma, rownames(cpmDGEList_plasma) %in% c("hsa-miR-372-3p", "hsa-miR-372-5p", "hsa-miR-373-3p", "hsa-miR-373-5p", "hsa-miR-371a-3p", "hsa-miR-371a-5p")) %>%
   as.data.frame() %>%
   t() %>%
   as.data.frame() %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'samplename')) %>%
+  plyr::rename(c('rowname' = 'samplename')) %>%
   left_join(., weeks, by = 'samplename') %>%
   select(., -samplename) %>%
   arrange(., gestation) %>%
@@ -393,7 +393,7 @@ pheatmap(as.matrix(all371_3_plasma),
 
 # Heat map miR-371-3 miRNA with weeks as annotation - Plasma
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 lcpm_plasma <- cpm(DGEList_plasma, log = TRUE)
 
