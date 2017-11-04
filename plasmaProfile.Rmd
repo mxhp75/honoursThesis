@@ -2,10 +2,7 @@
 title: "plasmaProfile"
 author: "Melanie Smith"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output:
-html_document:
-fig_width: 6
-fig_height: 4
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -18,7 +15,7 @@ This step imports the raw counts data and samples metadata and reports some summ
 
 ### Import Count Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
 library(plyr)
@@ -30,6 +27,7 @@ library(magrittr)
 library(RColorBrewer)
 library(edgeR)
 library(limma)
+library(pheatmap)
 
 # Import plasma miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
@@ -45,7 +43,7 @@ names(countsPlasma) = sub("_S.*","",names(countsPlasma))
 
 ### Import Sample Meta Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 # import the samples data from VM 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
   dplyr::select(-starts_with("X"))
@@ -73,7 +71,7 @@ samples$group <- ifelse(samples$gestation <= 13, "Trimester_1",
 
 ### Reassign object classes
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 samples$group <- as.factor(samples$group) 
 
@@ -83,7 +81,7 @@ samples <- as.data.frame(samples)
 
 ### Import and add fetal sex data to Sample Meta Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Add fetal sex to samples df
 fetalSex <- read.csv("~/Bcbioplasma/fetalSex.csv", header = TRUE) %>%
@@ -99,7 +97,7 @@ samples <- left_join(samples, fetalSex, by = "samplename")
 
 ### Summary Data
 
-```{r message=FALSE, warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # summary tables
 pandoc.table(samples,
@@ -123,7 +121,7 @@ lapply(samples[, c(2:8)], function(x) {
 
 From the raw counts we can see that is considerable difference in the number of unique miRNAs identified between samples.
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -138,7 +136,7 @@ rawNonZero <- plyr::numcolwise(nonzero)(countsPlasma) %>%
   set_colnames(c("samplename", "rawmiRNA")) %>%
   as.data.frame()
 
-# produce plot of # unique miRNA per sample
+# produce plot of # unique miRNA per sample - fill by trimester
 #png("rawmiRNAPlasma.png")
 ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA, fill = samples$group)) +
   geom_bar(stat = "identity") +
@@ -147,6 +145,16 @@ ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA, fill = samples$group
   geom_hline(yintercept=1571,linetype = "dashed") +
   geom_text(aes(20, 1600, label = "1571 Total miRNA"), size = 4, colour = "black") +
   scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+
+# produce plot of # unique miRNA per sample - no fill
+#pdf("rawmiRNAPlasma.pdf")
+ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Sample Name", y = "Count of miRNAs", title = "Count of pre-filtered miRNAs in Plasma") +
+  theme_bw()
 #dev.off()
 
 ```
@@ -160,7 +168,7 @@ Here any individual observation with less than 5 counts is considered to be sequ
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less or equal to than 5
 countsPlasma[countsPlasma <= 5] <- 0
@@ -179,7 +187,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # assign object to DGEList
 DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
@@ -193,7 +201,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the plasma libraries are within a similar range, however the mean of counts is small and centered around -5 CPM (log2)   
 
-```{r warning=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # Calculate and visualise normalisation factors
 nsamples <- ncol(DGEList_plasma)
@@ -211,7 +219,7 @@ DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of less than 1 CPM in 30 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 30) is chosen to attempt to overcome the large differences in library sizes. Using a samples cut off lower than 30 fails to adequately change the distribution of counts.   
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -235,7 +243,8 @@ DGEList_plasma <- DGEList_plasma[keep.exprs,, keep.lib.sizes = FALSE]
 nsamples <- ncol(DGEList_plasma)
 col <- brewer.pal(nsamples, "Paired")
 par(mfrow = c(1,2))
-plot(density(rawlcpm_plasma[,1]), col = col[1], lwd = 2, ylim = c(0,0.15), las = 2,
+pdf("unfilteredPlasmaProfile.pdf")
+plot(density(rawlcpm_plasma[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
   main = "", xlab = "")
 title(main = "A. Unfiltered data", xlab = "Log-cpm") 
 abline(v = 0, lty = 3)
@@ -244,9 +253,11 @@ for (i in 1:nsamples){
   lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty = "n")
+dev.off()
 
+pdf("filteredPlasmaProfile.pdf")
 lcpm <- cpm(DGEList_plasma, log=TRUE)
-plot(density(lcpm[,1]), col = col[1], lwd = 2, ylim = c(0,0.15), las = 2,
+plot(density(lcpm[,1]), col = col[1], lwd = 2, ylim = c(0,0.3), las = 2,
   main = "", xlab = "")
 title(main="B. Filtered data", xlab="Log-cpm") 
 abline(v = 0, lty = 3)
@@ -255,6 +266,7 @@ for (i in 1:nsamples){
 lines(den$x, den$y, col = col[i], lwd = 2)
 }
 #legend("topright", legend=samples$samplename, text.col=col, bty="n")
+dev.off()
 
 par(mfrow=c(1,1))
 
@@ -284,9 +296,33 @@ title(main="Maternal Plasma: Normalised data",ylab = "Log-cpm")
 
 ```
 
+### All plasma mean expression
+
+```{r message=FALSE, error=FALSE, warning=FALSE, cache=TRUE}
+
+# create expression DF for normalised plasma counts
+expressionPlasma <- cpm(DGEList_plasma$counts) %>%
+  as.data.frame()
+
+# subset the top 20 highly expressed miRs by the sum of expression over all samples.
+expressionPlasmaMean <- expressionPlasma[order(rowMeans(expressionPlasma), decreasing = TRUE), ] %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("miRNAs") %>%
+  as.data.frame() %>%
+  dplyr::slice(., 1:nrow(.)) %>% 
+  mutate(meanCPM = rowMeans(.[grep("^PAC", names(.))])) %>%
+  select(., -matches("PAC"))
+expressionPlasmaMean$Tissue <- "Plasma"
+# expressionPlasmaTop20$TissueSpecificity <- "unknown"
+# expressionPlasmaTop20$PregnancySpecificity <- "unknown"
+
+#pandoc.table(expressionPlasmaMean)
+
+```
+
 ### table - top 20 miRNA in Maternal Plasma by mean expression value (CPM)
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # create expression DF for normalised plasma counts
 expressionPlasma <- cpm(DGEList_plasma$counts) %>%
@@ -310,7 +346,7 @@ pandoc.table(expressionPlasmaTop20)
 
 ### table - top 100 miRNA in Maternal Plasma by mean expression value (CPM)
 
-```{r}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # create expression DF for normalised plasma counts
 expressionPlasma <- cpm(DGEList_plasma$counts) %>%
@@ -328,13 +364,13 @@ expressionPlasmaTop100$Tissue <- "Plasma"
 # expressionPlasmaTop20$TissueSpecificity <- "unknown"
 # expressionPlasmaTop20$PregnancySpecificity <- "unknown"
 
-saveRDS(expressionPlasmaTop100, "plasma_100.rds")
+#saveRDS(expressionPlasmaTop100, "plasma_100.rds")
 
 ```
 
 ## Heatmap of lcpm expression in Maternal Plasma (all robust miRs)
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
 
 lcpm <- cpm(DGEList_plasma, log = TRUE)
 
@@ -344,7 +380,7 @@ weeks <- samples[, c("samplename", "gestation")]
 # df of lcpm expression by weeks' gestation
 expressionWithWeek <- as.data.frame(t(lcpm)) %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'samplename')) %>%
+  plyr::rename(c('rowname' = 'samplename')) %>%
   left_join(., weeks, by = 'samplename') %>%
   select(samplename, gestation, everything()) %>%
   select(., -samplename) %>%
@@ -398,7 +434,7 @@ This code chunk is written to:
   - produce heat maps of binary expression vs no expression  
 nb: this analysis uses the countsPlasma object which has been filtered for sequencing noise (raw counts < 5 -> 0). The counts have not been filtered for low expression, and have not been normalised. I consider this acceptable as the filter for minimum representation (2 samples in any week) has been applied, and the counts are only considered as a binary (on/off) varible such that the actual expression values are not relevant.
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -577,7 +613,7 @@ png(paste("plasma_heatmap_", i, ".png", sep = ""), width = 600, height = 500, re
 
 ## Single week expression after filtering for >= 2 expression in given week
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # miRs with expression in one week only
 w6 <- subset(countsByWeek, countsByWeek$week06 == 1 & (rowSums(countsByWeek[, 3:10]) == 0))
@@ -590,11 +626,11 @@ w13 <- subset(countsByWeek, countsByWeek$week13 == 1 & (rowSums(countsByWeek[, c
 w14 <- subset(countsByWeek, countsByWeek$week14 == 1 & (rowSums(countsByWeek[, c(2:8, 10)]) == 0))
 w16 <- subset(countsByWeek, countsByWeek$week16 == 1 & (rowSums(countsByWeek[, 2:9]) == 0))
 
-singleWeekExpression <- bind_rows(w6, w7, w8, w9, w10, w11, w13, w14, w16) %>%
+singleWeekExpressionPlasma <- bind_rows(w6, w7, w8, w9, w10, w11, w13, w14, w16) %>%
   tibble::column_to_rownames()
 
 # only works before the cluster steps
-pheatmap(as.matrix(singleWeekExpression), 
+pheatmap(as.matrix(singleWeekExpressionPlasma), 
          cluster_cols = FALSE,
          cluster_rows = FALSE,
          cellwidth = 15, 
@@ -609,15 +645,15 @@ pheatmap(as.matrix(singleWeekExpression),
          treeheight_row = 0)
 
 # cluster to obtain order for heatmap (default distance method = euclidean)
-clust <- hclust(dist(singleWeekExpression))
+clust <- hclust(dist(singleWeekExpressionPlasma))
 
 # order oxygenMediatedExpression by cluster order
-singleWeekExpression <- singleWeekExpression[match(clust$labels, rownames(singleWeekExpression)), ] %>%
+singleWeekExpressionPlasma <- singleWeekExpressionPlasma[match(clust$labels, rownames(singleWeekExpressionPlasma)), ] %>%
   tibble::rownames_to_column()
 
 # Heatmap of miRNA in plasma with expression >=2 weeks before or after the 10 week line and nothing on the other side.
-singleCounts_melt <- melt(singleWeekExpression, id = "rowname") %>%
-  rename(c('rowname' = 'miRNA'))
+singleCounts_melt <- melt(singleWeekExpressionPlasma, id = "rowname") %>%
+  plyr::rename(c('rowname' = 'miRNA'))
   
 ggplot(singleCounts_melt, aes(variable, miRNA)) +
   geom_tile(aes(fill = as.factor(value)), colour = "white") +
@@ -639,17 +675,17 @@ ggplot(singleCounts_melt, aes(variable, miRNA)) +
 There is a change in placental function around the 10 weeks' gestation mark when the placenta infiltrates the maternal blood space and begins to extract oxygen and nutrients from the mother as well as discard waste.   
 Here I'm looking for miRs which are specific to either to pre or post infiltration stage. To identify these miRs I've used a filter whereby miRs with expression in at least 2 weeks prior to the week 10 cut off (ie columns 2:5) but nothing after are subset. Then miRs with expression in at least 2 samples post the week 10 cut off (ie columns 7:10) but nothing before the cut off are subset. The two subsetted df are then concatonated to produce a df of only miRs which fit the two filter criteria.
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 left <- subset(countsByWeek, (rowSums(countsByWeek[, 2:5]) > 1 & (rowSums(countsByWeek[, 7:10]) < 1)))
 
 right <- subset(countsByWeek, (rowSums(countsByWeek[, 2:5]) < 1 & (rowSums(countsByWeek[, 7:10]) > 1)))
 
-oxygenMediatedExpression <- bind_rows(left, right) %>%
+oxygenMediatedExpressionPlasma <- bind_rows(left, right) %>%
   tibble::column_to_rownames()
 
 # only works before the cluster steps
-pheatmap(as.matrix(oxygenMediatedExpression), 
+pheatmap(as.matrix(oxygenMediatedExpressionPlasma), 
          cluster_cols = FALSE,
          cluster_rows = TRUE,
          cellwidth = 15, 
@@ -664,16 +700,17 @@ pheatmap(as.matrix(oxygenMediatedExpression),
          treeheight_row = 0)
 
 # cluster to obtain order for heatmap (default distance method = euclidean)
-clust <- hclust(dist(oxygenMediatedExpression))
+clust <- hclust(dist(oxygenMediatedExpressionPlasma))
 
 # order oxygenMediatedExpression by cluster order
-oxygenMediatedExpression <- oxygenMediatedExpression[match(clust$labels, rownames(oxygenMediatedExpression)), ] %>%
+oxygenMediatedExpressionPlasma <- oxygenMediatedExpressionPlasma[match(clust$labels, rownames(oxygenMediatedExpressionPlasma)), ] %>%
   tibble::rownames_to_column()
 
 # Heatmap of miRNA in plasma with expression >=2 weeks before or after the 10 week line and nothing on the other side.
-hypoxicCounts_melt <- melt(oxygenMediatedExpression, id = "rowname") %>%
-  rename(c('rowname' = 'miRNA'))
+hypoxicCounts_melt <- melt(oxygenMediatedExpressionPlasma, id = "rowname") %>%
+  plyr::rename(c('rowname' = 'miRNA'))
   
+#pdf("heatHypoxicPlasma.pdf", height = 11, width = 6)
 ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
   geom_tile(aes(fill = as.factor(value)), colour = "white") +
   scale_fill_manual(values = c("darksalmon", "forestgreen")) +
@@ -684,10 +721,10 @@ ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme(legend.position = "none") +
   theme(axis.title.y = element_blank(),
-      axis.text.y = element_text(hypoxicCounts_melt$rowname)) +
-  geom_vline(xintercept = 3.55, colour = "white") + 
+  axis.text.y = element_text(hypoxicCounts_melt$rowname)) +
   geom_vline(xintercept = 5.45, colour = "white") + 
   coord_fixed(ratio = 1)
+#dev.off()
 
 ```
 
@@ -697,7 +734,7 @@ ggplot(hypoxicCounts_melt, aes(variable, miRNA)) +
     + filtered for sequencing noise (all counts < 5 reduced to 0)
     + filtered for miRs with 0 counts in all samples (after the < 5 to 0 filter)
 
-```{r warning=FALSE, error=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # select on the samplename and gestation (week) columns from the samples df
 sampleSex <- samples[, c(1, 9)] 
@@ -735,11 +772,11 @@ countsBySex <- cbind(leading, countsBySex)
 
 # subset expression by fetal sex
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 # subset the female samples from counts - may end up with some zero counts
 allFemale <- dplyr::filter(countsBySex, Sex == "Female") %>%
-  rename(c('samplename' = 'rowname')) %>% 
+  plyr::rename(c('samplename' = 'rowname')) %>% 
   tibble::column_to_rownames() %>%
   select(-matches("Sex")) %>%
   t() %>%
@@ -763,7 +800,7 @@ ExpressionFemale <- allFemale[ !rowSums(allFemale) == 0, ] %>%
 
 # subset the male samples from counts - may end up with some zero counts
 allMale <- dplyr::filter(countsBySex, Sex == "Male") %>%
-  rename(c('samplename' = 'rowname')) %>% 
+  plyr::rename(c('samplename' = 'rowname')) %>% 
   tibble::column_to_rownames() %>%
   select(-matches("Sex")) %>%
   t() %>%
@@ -788,20 +825,20 @@ ExpressionMale <- allMale[ !rowSums(allMale) == 0, ] %>%
 
 # sex specific expression - female
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 zeroMale <- as.data.frame(rownames(zeroExpressionMale)) %>%
   set_colnames("miRNA")
 
 allfemale <- allFemale %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'miRNA'))
+  plyr::rename(c('rowname' = 'miRNA'))
 
 bioFemale <- as.data.frame(rownames(biologicallyRelevantFemale)) %>%
   set_colnames("miRNA")
 
 femaleOnly <- semi_join(allfemale, zeroMale, by = "miRNA") %>%
-  rename(c('miRNA' = 'rowname')) %>%
+  plyr::rename(c('miRNA' = 'rowname')) %>%
   tibble::column_to_rownames()
 
 femaleOnly$numberSamples <- as.data.frame(rowSums(femaleOnly))
@@ -819,20 +856,20 @@ proportionFemale <- (femaleOnly$numberSamples)/(ncol(femaleOnly)-1)
 
 # sex specific expression - male
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
 
 zeroFem <- as.data.frame(rownames(zeroExpressionFemale)) %>%
   set_colnames("miRNA")
 
 allmale <- allMale %>%
   tibble::rownames_to_column() %>%
-  rename(c('rowname' = 'miRNA'))
+  plyr::rename(c('rowname' = 'miRNA'))
 
 bioMale <- as.data.frame(rownames(biologicallyRelevantMale)) %>%
   set_colnames("miRNA")
 
 maleOnly <- semi_join(allmale, zeroFem, by = "miRNA") %>%
-  rename(c('miRNA' = 'rowname')) %>%
+  plyr::rename(c('miRNA' = 'rowname')) %>%
   tibble::column_to_rownames()
 
 # How anyof the male samples express the 'male specific' miRNA
@@ -846,6 +883,17 @@ cbind(maleOnly$numberSamples, proportionMale) %>%
 
 # xtable(cbind(maleOnly$numberSamples, proportionMale) %>%
 #   set_colnames(c("numberSamples", "proportionSamples")))
+
+```
+
+# CPM lists for correlation exploration
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+# create object holding the normalised counts per million for plasma samples and save
+cpmPlasmaNormal <- cpm(DGEList_plasma)
+
+#saveRDS(cpmPlasmaNormal, "cpmPlasmaNormal.rds")
 
 ```
 
