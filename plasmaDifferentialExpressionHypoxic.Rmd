@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This step imports the raw counts data and samples metadata and reports some summary information.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # load required libraries
 library(plyr)
@@ -25,6 +25,7 @@ library(magrittr)
 library(RColorBrewer)
 library(edgeR)
 library(limma)
+library(pheatmap)
 
 # import miRNA counts table from VM
 countsPlasma <- read.table(("~/plasmaBcbio/plasma/final/2017-05-22_plasma/counts_mirna.tsv"), 
@@ -41,7 +42,7 @@ names(countsPlasma) = sub("_S.*","",names(countsPlasma))
 
 # import the samples data from VM 
 
-```{r}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 samples <- readr::read_delim("~/placenta_miRNA.tsv", delim = "\t") %>% 
   dplyr::select(-starts_with("X"))
@@ -94,7 +95,7 @@ samples <- left_join(samples, fetalSex, by = "samplename")
 
 From the raw counts we can see that there is a large difference in the number of unique miRNAs identified between samples. Of the 1571 unique miRNAs identified, samples vary between 355 and 973 miRNA. The population of miRNAs varies between samples.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -127,7 +128,7 @@ Here any individual observation with less than five counts is considered to be s
   * Logic check and record how many miRs will be filtered
   * Filter to remove miRs with zero counts in all samples
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # exclude any individual count less or equal to than 10
 countsPlasma[countsPlasma <= 5] <- 0
@@ -147,7 +148,7 @@ After filtering out the sequencing noise (sequence counts with low confidence) w
 
 The counts and samples data can now be combined into a single list object for use in differential expression analysis downstream.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # assign object to DGEList
 DGEList_plasma <- DGEList(counts = countsPlasma, samples = samples)
@@ -161,7 +162,7 @@ Normalising the libraries allows for the direct comparison between samples.
 Here the Trimmed Mean of M Values method is used.   
 Prior to normalisation the plasma libraries are not within a similar range. The mean of counts is small and centered around -5 CPM (log2) for the majority of samples.
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # Calculate and visualise normalisation factors
 nsamples <- ncol(DGEList_plasma)
@@ -185,7 +186,7 @@ DGEList_plasma <- calcNormFactors(DGEList_plasma, method = "TMM")
 
 Once the libraries are normalised we can filter for biological noise - i.e. miRNAs that are present in such small numbers that they are not biologically relevant. Here a count of greater than 2 CPM in 7 or more samples is considered biologically relevant for this analysis. A count of 2 CPM is the equivalant of ~12 transcripts in the smallest library. The number of samples (here 7) is chosen such that it is possible for a miRNA to be expressed in every sample of the smallest group (here Trimester 2). 
 
-```{r warning=FALSE, message=FALSE, error=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot theme
 theme_set(theme_bw())
@@ -267,7 +268,7 @@ ggplot(data = filteredNonZero, aes(x = rowname, y = V1, fill = samples$group)) +
 The multidimensional scaling plots create a temp. log fold change between pairs.   
 Here we see that the Leading logFC on dimension 1 and 2 fails to seperate the samples by trimester.
 
-```{r}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 lcpm <- cpm(DGEList_plasma, log = TRUE, prior.count = 1)
 
@@ -284,9 +285,7 @@ title(main = "Maternal Plasma: Multi Dimensional Scaling Plot")
   * Differential Expression between hypoxic and oxygenated placenta - maternal plasma
     + Here the design matrix treats gestation as a discrete variable with levels "Hypoxic" and "Oxygenated".
 
-```{r}
-
-par(mfrow=c(1,1))
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 # set ggplot2 theme
 theme_set(theme_bw())
@@ -303,20 +302,21 @@ fit <- lmFit(v, design)
 fit <- contrasts.fit(fit, cont.mat)
 fit <- eBayes(fit) # moderated t-test
 summary(decideTests(fit))
-topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , p = 0.05, adjust.method = "fdr") # requires eBayes.
+topTable <- topTable(fit, coef = 1, n = Inf, sort = "p" , adjust.method = "fdr") # requires eBayes.
 plotMD(fit, main = "Maternal Plasma: Mean Difference Plot\nOxygenation")
 
-summary(lmFit)
+
+#summary(fit)
 
 ```
 
 ## Volcano plot for visualisation of differential expression by oxygen state
 
-```{r warning=FALSE, error=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
 
 decide <- decideTests(fit)
 
-d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(2,6)]
+d2 <- topTable(fit, coef = 1, n = Inf, sort = "p")[,c(1,5)]
 d2$threshold <- 0
 d2$threshold[0:nrow(topTable)] <- 1
 d2$threshold <- as.factor(d2$threshold)
@@ -347,7 +347,7 @@ ggplot(data = d4, aes(x = logFC, y = neg.log10FDR, colour = V1)) +
 
 ```
 
-```{r echo=FALSE}
+```{r}
 
 today <- Sys.Date()
 
