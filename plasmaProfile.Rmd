@@ -41,6 +41,53 @@ names(countsPlasma) = sub("_S.*","",names(countsPlasma))
 
 ```
 
+# counts QC
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+total_countsPlasma <- colSums(countsPlasma) %>%
+   as.data.frame() %>%
+   tibble::rownames_to_column() %>%
+   set_colnames(c("samplename","totalReads"))
+
+#pdf("plasmaTotalReads.pdf")
+ggplot(data = total_countsPlasma, aes(x = samplename, y = totalReads, fill = samples$group)) +
+   geom_bar(stat = "identity") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+   labs(x = "Sample Name", y = "Total Reads") + 
+   geom_hline(yintercept=5.0e+06,linetype = "dashed") +
+   scale_fill_discrete(name = "Trimester")
+#dev.off()
+
+
+# WriteXLS("total_countsPlasma", 
+#             ExcelFileName = "total_countsPlasma.xls", 
+#             row.names = TRUE)
+
+head_countsPlasma <- countsPlasma %>%
+   tibble::rownames_to_column() %>%
+   arrange(desc(PAC006)) %>%
+   filter(., PAC006 > 100000)
+
+# WriteXLS("head_countsPlasma", 
+#             ExcelFileName = "head_countsPlasma.xls", 
+#             row.names = TRUE)
+
+totalReads <- colSums(t(countsPlasma)) %>%
+   as.data.frame() %>%
+   set_colnames("totalReads_per_miR") %>%
+   arrange(PAC006)
+
+ggplot(data = total_countsPlasma, aes(x = samplename, y = totalReads, fill = samples$group)) +
+   geom_bar(stat = "identity") +
+   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+   labs(x = "Sample Name", y = "Total Reads") + 
+   geom_hline(yintercept=5.0e+06,linetype = "dashed") +
+   scale_fill_discrete(name = "Trimester")
+
+
+```
+
 ### Import Sample Meta Data
 
 ```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
@@ -156,6 +203,42 @@ ggplot(data = rawNonZero, aes(x = samplename, y = rawmiRNA)) +
   labs(x = "Sample Name", y = "Count of miRNAs", title = "Count of pre-filtered miRNAs in Plasma") +
   theme_bw()
 #dev.off()
+
+```
+
+# QC miRNA populations
+
+```{r}
+
+library(ggplot2)
+
+nba <- read.csv("http://datasets.flowingdata.com/ppg2008.csv")
+nba$Name <- with(nba, reorder(Name, PTS))
+nba.m <- melt(nba)
+nba.m <- ddply(nba.m, .(variable), transform, rescale = rescale(value))
+
+p <- ggplot(nba.m, aes(variable, Name)) + geom_tile(aes(fill = rescale),
+     colour = "white") + scale_fill_gradient(low = "white",
+     high = "steelblue")
+
+miRNA_population <- countsPlasma
+miRNA_population[miRNA_population>0]<-1
+miRNA_population <- tibble::rownames_to_column(miRNA_population) %>%
+  rename('rowname' = 'miRNA')
+miRNA_population$miRNA <- with(miRNA_population, reorder(miRNA, PAC006))
+
+melt_miRNA <- melt(miRNA_population)
+
+base_size <- 9
+ggplot(data = melt_miRNA, aes(x = variable, y = miRNA)) +
+  geom_tile(aes(fill=melt_miRNA$value), colour = "white") + 
+  scale_fill_gradient(low = "white", high = "blue") + 
+  theme_grey(base_size = base_size) + labs(x = "", y = "") + 
+  scale_x_discrete(expand = c(0, 0)) + 
+  scale_y_discrete(expand = c(0, 0)) +
+  ggtitle("miRNA Population Variability\nMaternal Plasma") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
 
 ```
 
@@ -897,6 +980,333 @@ cpmPlasmaNormal <- cpm(DGEList_plasma)
 
 ```
 
+# Looking for Hemolysis - miRNA associated with hemolysis
+  - I've split the miRNAs associated with hemolysis from the Kirschner 2013 paper into two sets
+    - low expression set: expression values tend to be in the 100s
+    - high expression set: expression values are in 1000s or 10,000s
+  - I've plotted these seperately because it was difficult to see the expression changes in the low expression miRNAs
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+# miRNA to asses ratio of stable versus erythrocyte associated molecules from Blondal et al 2012
+plasma_miR <- c("hsa-miR-451a", "hsa-miR-23a-3p")
+
+# miRNA to asses expression of hemolysis associated molecules from Kirschner et al 2013
+plasma_miR_low <- c("hsa-miR-15b-3p", "hsa-miR-15b-5p", "hsa-miR-486-3p", "hsa-miR-532-3p", "hsa-miR-532-5p", "hsa-miR-636", "hsa-miR-1255b-5p")
+
+plasma_miR_high <- c("hsa-miR-16-5p", "hsa-miR-451a", "hsa-miR-486-5p")
+
+# gestational order for plots
+gestation_order <- sampleWeek %>%
+  arrange(gestation)
+
+###### CPM CPM CPM CPM CPM ########
+cpm <- cpm(DGEList_plasma$counts)
+
+# subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma <- subset(cpm, rownames(cpm) %in% plasma_miR) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  set_colnames(c("samplename", "23a", "451a"))
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma <- cpm_hemoCountsPlasma %>%
+  as.tibble() %>%
+  dplyr::mutate(delta_cpm = `23a`-`451a`,
+         ratio_cpm = `23a`/`451a`) %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename')
+
+#subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma_low <- subset(cpm, rownames(cpm) %in% plasma_miR_low) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(., 'rowname' = 'samplename')
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma_low <- cpm_hemoCountsPlasma_low %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename') %>%
+  arrange(gestation)
+
+#subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma_high <- subset(cpm, rownames(cpm) %in% plasma_miR_high) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(., 'rowname' = 'samplename')
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma_high <- cpm_hemoCountsPlasma_high %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename') %>%
+  arrange(gestation)
+
+###### PLOT PLOT PLOT PLOT PLOT PLOT PLOT ########
+
+ggplot(data = cpm_hemoCountsPlasma, aes(x = `23a`, y = `451a`)) +
+  geom_point() +
+  geom_line() +
+  theme_bw()
+
+cpm_hemoCountsPlasma <- cpm_hemoCountsPlasma %>%
+  arrange(desc(delta_cpm))
+
+ggplot(data = cpm_hemoCountsPlasma, aes(x = samplename, y = delta_cpm, fill = gestation)) +
+  geom_bar(stat="identity") +
+  scale_x_discrete(limits=cpm_hemoCountsPlasma$samplename) +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+cpm_hemoCountsPlasma <- cpm_hemoCountsPlasma %>%
+  arrange(desc(ratio_cpm))
+
+ggplot(data = cpm_hemoCountsPlasma, aes(x = samplename, y = ratio_cpm, fill = gestation)) +
+  geom_bar(stat="identity") +
+  scale_x_discrete(limits=cpm_hemoCountsPlasma$samplename) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+# melt the dataset into long for so I can stagger the bars in the bar plot
+cpm_hemoCountsPlasma_low_melt <- melt(cpm_hemoCountsPlasma_low, 
+                     variable.name = "miRNA",
+                     value.names = "value",
+                     id.vars = c("samplename", "gestation"))
+
+# bar plot with each miRNA as a seperate vertical bar against each sample
+ggplot(data = cpm_hemoCountsPlasma_low_melt, 
+       aes(x = factor(samplename, level = gestation_order$samplename), 
+           y = value, fill = miRNA)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_brewer(palette = "Spectral") +
+  ggtitle("Expression of Hemolysis Associated \nmiRNA in Maternal Plasma (low)") +
+  xlab("Samples by ascending gestation") +
+  ylab("Normalised CPM Expression") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+# melt the dataset into long for so I can stagger the bars in the bar plot
+cpm_hemoCountsPlasma_high_melt <- melt(cpm_hemoCountsPlasma_high, 
+                     variable.name = "miRNA",
+                     value.names = "value",
+                     id.vars = c("samplename", "gestation"))
+
+# bar plot with each miRNA as a seperate vertical bar against each sample
+ggplot(data = cpm_hemoCountsPlasma_high_melt, 
+       aes(x = factor(samplename, level = gestation_order$samplename), 
+           y = value, fill = miRNA)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_manual(values = c("red", "green", "blue")) +
+  ggtitle("Expression of Hemolysis Associated \nmiRNA in Maternal Plasma (high)") +
+  xlab("Samples by ascending gestation") +
+  ylab("Normalised CPM Expression") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+
+# ###### logCPM logCPM logCPM logCPM logCPM ########
+# 
+# # subset the miRNA of interest in hemolysis analysis
+# lcpm_hemoCountsPlasma <- subset(lcpm, rownames(lcpm) %in% plasma_miR) %>%
+#   t() %>%
+#   as.data.frame() %>%
+#   tibble::rownames_to_column() %>%
+#   set_colnames(c("rowname", "23a", "451a"))
+# 
+# # add columns for difference and ratio of miRs of interest
+# lcpm_hemoCountsPlasma <- lcpm_hemoCountsPlasma %>%
+#   as.tibble() %>%
+#   dplyr::mutate(delta_lcpm = `23a`-`451a`,
+#          ratio_lcpm = `23a`/`451a`) %>%
+#   as.data.frame()
+# 
+# ###### PLOT PLOT PLOT PLOT PLOT PLOT PLOT ########
+# 
+# ggplot(data = lcpm_hemoCountsPlasma, aes(x = `23a`, y = `451a`)) +
+#   geom_point() +
+#   theme_bw()
+# 
+# lcpm_hemoCountsPlasma <- lcpm_hemoCountsPlasma %>% 
+#   arrange(desc(delta_lcpm))
+# 
+# ggplot(data = lcpm_hemoCountsPlasma, aes(x = rowname, y = delta_lcpm)) +
+#   geom_bar(stat="identity") +
+#   scale_x_discrete(limits=lcpm_hemoCountsPlasma$rowname) +
+#   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+
+```
+
+# Looking for Hemolysis - miRNA unaffected by hemolysis
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+
+# miRNA to asses expression of stable molecules from Kirschner et al 2013
+stable_miR_low <- c("hsa-miR-1274b", "hsa-miR-142-3p", "hsa-miR-142-5p", "hsa-miR-146a-3p", "hsa-miR-146a-5p", "hsa-miR-122-3p", "hsa-miR-122-5p", "hsa-miR-23a-3p")
+
+###### CPM CPM CPM CPM CPM ########
+#cpm <- cpm(DGEList_plasma$counts)
+
+#subset the miRNA of interest in hemolysis analysis
+cpm_stableCountsPlasma <- subset(cpm, rownames(cpm) %in% stable_miR_low) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  rename(., 'rowname' = 'samplename')
+
+# add columns for difference and ratio of miRs of interest
+cpm_stableCountsPlasma <- cpm_stableCountsPlasma %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename') %>%
+  arrange(gestation)
+
+###### PLOT PLOT PLOT PLOT PLOT PLOT PLOT ########
+
+# melt the dataset into long for so I can stagger the bars in the bar plot
+cpm_stableCountsPlasma_melt <- melt(cpm_stableCountsPlasma, 
+                     variable.name = "miRNA",
+                     value.names = "value",
+                     id.vars = c("samplename", "gestation"))
+
+# bar plot with each miRNA as a seperate vertical bar against each sample
+ggplot(data = cpm_stableCountsPlasma_melt, 
+       aes(x = factor(samplename, level = gestation_order$samplename), 
+           y = value, fill = miRNA)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_brewer(palette = "Spectral") +
+  ggtitle("Expression of Hemolysis Stable \nmiRNA in Maternal Plasma") +
+  xlab("Samples by ascending gestation") +
+  ylab("Normalised CPM Expression") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+```
+
+# Looking for Hemolysis - normalise miR-451a using miR-23a-3p expression
+  - miR-23a is known to be stable in plasma before and after hemolysis
+  By normalising both miR-23a and miR-451a I plan to look at the relative expression of these two transcripts in each sample on a 'per sample' basis.
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+# miRNA to asses expression of stable molecules from Kirschner et al 2013
+stable_miR_ratio_451a <- c("hsa-miR-23a-3p", "hsa-miR-451a")
+
+# subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma_stable_451a <- subset(cpm, rownames(cpm) %in% stable_miR_ratio_451a) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  set_colnames(c("samplename", "23a", "451a"))
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma_stable_451a <- cpm_hemoCountsPlasma_stable_451a %>%
+  as.tibble() %>%
+  dplyr::mutate(normalised_23a = `23a`/`23a`,
+         normalised_451a = `451a`/`23a`) %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename')
+
+ggplot(data = cpm_hemoCountsPlasma_stable_451a, aes(x = samplename, y = normalised_451a)) +
+  geom_bar(stat="identity") +
+  scale_x_discrete(limits=cpm_hemoCountsPlasma_stable_451a$samplename) +
+  geom_hline(yintercept=1,linetype = "dashed", color = "blue") +
+  geom_hline(yintercept=32,linetype = "dashed", color = "green") +
+  geom_hline(yintercept=128,linetype = "dashed", color = "red") +
+  geom_hline(yintercept=256,linetype = "dashed", color = "red") +
+  ggtitle("Sequencing approximation of delta Cq \nmiR-451a/miR-23a") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+
+```
+
+# Looking for Hemolysis - normalise miR-451a using miR-23a-3p expression on a "per sample" basis where:
+  - potential pseudo Cq curves are plotted assuming the copy number for miR-23a-3p starts at 1.
+  - both curves use the FCN = ICN * 2^# cycles algorithm 
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+
+# miRNA to asses expression of stable molecules from Kirschner et al 2013
+stable_miR_ratio_451a <- c("hsa-miR-23a-3p", "hsa-miR-451a")
+
+# subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma_stable_451a <- subset(cpm, rownames(cpm) %in% stable_miR_ratio_451a) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  set_colnames(c("samplename", "miR_23a", "miR_451a"))
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma_stable_451a <- cpm_hemoCountsPlasma_stable_451a %>%
+  as.tibble() %>%
+  dplyr::mutate(normalised_23a = `miR_23a`/`miR_23a`,
+         normalised_451a = `miR_451a`/`miR_23a`) %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename') %>%
+  filter(., samplename == "PAC017")
+
+test <- rbind(cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a, cpm_hemoCountsPlasma_stable_451a)
+test <- test[, c(1:5)]
+cycle <- as.data.frame(c(0:8)) %>%
+  set_colnames("cycle")
+
+test <- cbind(test, cycle)
+test <- test %>%
+  dplyr::mutate(Cq_23a = normalised_23a*2^cycle,
+                Cq_451a = normalised_451a*2^cycle)
+
+ggplot(data = test, aes(x = cycle, y=Cq_23a)) +
+  geom_point()
+
+test_melt <- test[, c(1, 6:8)] %>%
+  melt(., id = c("samplename", "cycle"))
+
+ggplot(data = test_melt, aes(x = cycle, y=value, fill=variable)) +
+  geom_point() + 
+  geom_line() +
+  ggtitle("PAC017") +
+  theme_bw()
+
+```
+
+# Looking for Hemolysis - normalise miR-16-5p using miR-23a-3p expression
+  - miR-23a is known to be stable in plasma before and after hemolysis
+  By normalising both miR-23a and miR-451a I plan to look at the relative expression of these two transcripts in each sample on a 'per sample' basis.
+
+```{r message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+
+# miRNA to asses expression of stable molecules from Kirschner et al 2013
+stable_miR_ratio_16 <- c("hsa-miR-23a-3p", "hsa-miR-16-5p")
+
+# subset the miRNA of interest in hemolysis analysis
+cpm_hemoCountsPlasma_stable_16 <- subset(cpm, rownames(cpm) %in% stable_miR_ratio_16) %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column() %>%
+  set_colnames(c("samplename", "miR_23a", "miR_16"))
+
+# add columns for difference and ratio of miRs of interest
+cpm_hemoCountsPlasma_stable_16 <- cpm_hemoCountsPlasma_stable_16 %>%
+  as.tibble() %>%
+  dplyr::mutate(normalised_23a = `miR_23a`/`miR_23a`,
+         normalised_16 = `miR_16`/`miR_23a`,
+         normalised_23a = `miR_23a`/`miR_16`) %>%
+  as.data.frame() %>%
+  left_join(., sampleWeek, by='samplename')
+
+ggplot(data = cpm_hemoCountsPlasma_stable_16, aes(x = samplename, y = normalised_23a)) +
+  geom_bar(stat="identity") +
+  scale_x_discrete(limits=cpm_hemoCountsPlasma_stable_16$samplename) +
+  ggtitle("Sequencing approximation of delta Cq \nmiR-16-5p/miR-23a") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=1))
+
+
+```
 
 ```{r echo=FALSE}
 
